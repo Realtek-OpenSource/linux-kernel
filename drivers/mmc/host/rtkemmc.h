@@ -594,7 +594,7 @@ static const unsigned char rtk_sd_cmdcode[64][2] = {
 
 /* rtk function definition */
 int error_handling(struct rtkemmc_host *emmc_port, unsigned int cmd_idx, unsigned int bIgnore);
-int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port,int,unsigned long);
+int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port,int,unsigned long, int,int*);
 int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port,int,unsigned long);
 int rtkemmc_send_cmd24(struct rtkemmc_host *emmc_port);
 int rtkemmc_send_cmd17(struct rtkemmc_host *emmc_port);

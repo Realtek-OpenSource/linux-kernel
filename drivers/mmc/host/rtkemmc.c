@@ -1036,7 +1036,7 @@ int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port, int size, unsigned long a
 	return ret_err;
 }
 
-int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port,int size, unsigned long addr)
+int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port,int size, unsigned long addr, int data_src, int *hs400_data)
 {
         int ret_err=0,i=0;
         struct sd_cmd_pkt cmd_info;
@@ -1056,12 +1056,24 @@ int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port,int size, unsigned long ad
                 return -5;
         }
 
-        for(i=0;i<(size/4);i++)
-        {
-		if(GLOBAL==0x80000000) GLOBAL=0;
-		else GLOBAL++;
-		*(u32 *)(gddr_dma_org+(i*4)) = GLOBAL;
-        }
+	if(data_src==0) {
+		for(i=0;i<(size/4);i++)
+		{
+			if(GLOBAL==0x80000000) GLOBAL=0;
+			else GLOBAL++;
+			*(u32 *)(gddr_dma_org+(i*4)) = GLOBAL;
+		}
+	}
+	else if(data_src==1) {
+		for(i=0;i<(size/4);i++)
+                {
+                        if(GLOBAL==0x80000000) GLOBAL=0;
+                        else GLOBAL++;
+                        *(u32 *)(gddr_dma_org+(i*4)) = hs400_data[i];
+                }
+	}
+	else printk(KERN_ERR "data_source flag should be 0 or 1\n");
+
         wmb();
 
         if (cmd_info.cmd == NULL)
@@ -1405,7 +1417,7 @@ void rtkemmc_phase_tuning(struct rtkemmc_host *emmc_port,u32 mode,int flag)
 #ifdef DEBUG
 				printk("phase =0x%x \n", i);
 #endif
-				if(rtkemmc_send_cmd25(emmc_port, 1024,0xfe) != 0)
+				if(rtkemmc_send_cmd25(emmc_port, 1024,0xfe,0,NULL) != 0)
 					TX1_window= TX1_window&(~(1<<i));
 			}
 		}
@@ -1541,6 +1553,7 @@ static int mmc_Tuning_HS400(struct rtkemmc_host *emmc_port,u32 mode)
 	if (!g_bResuming)
 		gCurrentBootMode = MODE_HS400;
 	MMCPRINTF("[LY]sdr gCurrentBootMode =%d\n",gCurrentBootMode);
+
 	rtkemmc_set_freq(emmc_port, 0x70); //200Mhz
 	rtkemmc_set_ip_div(emmc_port, EMMC_CLOCK_DIV_NON); // 200MHZ/1 = 200MHZ
 
@@ -1613,7 +1626,7 @@ static int rtkemmc_execute_tuning(struct mmc_host *host, u32 opcode)
 static int rw_test_tuning(struct rtkemmc_host *emmc_port,unsigned long emmc_blk_addr)
 {
 	int i;
-	rtkemmc_send_cmd25(emmc_port,DMA_ALLOC_LENGTH, emmc_blk_addr);
+	rtkemmc_send_cmd25(emmc_port,DMA_ALLOC_LENGTH, emmc_blk_addr,0, NULL);
 #ifdef SHA256
 	MCP_SHA256((unsigned char *)emmc_port->dma_paddr, (unsigned char *)compare3_phy_addr, DMA_ALLOC_LENGTH, NULL);
 #else
@@ -1656,6 +1669,8 @@ static void rtkemmc_dqs_tuning(struct mmc_host *host)
 	unsigned int bitmap=0;
 	unsigned int max=0;
 
+	int hs400_data[128]={0};        //4 bytes header, 33aa, 4 bytes for TX, 4 bytes for RX, 4 bytes for dqs
+
         emmc_port = mmc_priv(host);
 	mdelay(2);
 
@@ -1688,8 +1703,18 @@ static void rtkemmc_dqs_tuning(struct mmc_host *host)
 #ifdef CONFIG_ARCH_RTD129x
 		rtk_lockapi_unlock2(flags2, _at_("rtkemmc_dqs_tuning"));
 #endif
-		set_RTK_initial_flag(1);
-		return;
+		printk(KERN_ERR "read/write test for inherit hs400 parameter...\n");
+		if( rw_test_tuning(emmc_port, (emmc_port->emmc_tuning_addr/512))==0) {
+			printk(KERN_ERR "read/write test success for hs400 parameter!!!\n");
+			set_RTK_initial_flag(1);
+			return;
+		}
+		else {
+			emmc_port->dqs_tuning=1;
+			emmc_port->tx_tuning = 1;
+			emmc_port->rx_tuning = 1;
+			printk(KERN_ERR "read/write test failed, retune the hs400...\n");
+		}
 	}
 #endif
 	down_write(&cr_rw_sem);
@@ -1754,7 +1779,6 @@ retry:
 	if(max==0) {
 		if((++retry_count)<5) {
                         printk(KERN_ERR "DQS_RETRY: dqs tap bitmap= 0x%x, retry: %d\n", bitmap, retry_count);
-                        //rtkemmc_set_freq(emmc_port, 0x57); //200Mhz
                         sync(emmc_port);
                         mdelay(10);
                         goto retry;
@@ -1800,6 +1824,15 @@ retry:
 #ifdef CONFIG_ARCH_RTD129x
 	rtk_lockapi_unlock2(flags2, _at_("rtkemmc_dqs_tuning"));
 #endif
+
+	printk(KERN_ERR "save eMMC hs400 parameter to emmc dqs_tuning_blk_addr 0x%x\n", emmc_port->emmc_tuning_addr);
+	hs400_data[0] = 0x33aa;
+	hs400_data[1] = (readl(emmc_port->crt_membase + SYS_PLL_EMMC1) & 0x000000f8) >> 3;
+	hs400_data[2] = (readl(emmc_port->crt_membase + SYS_PLL_EMMC1) & 0x00001f00) >> 8;
+	hs400_data[3] = readl(emmc_port->emmc_membase + EMMC_DQS_CTRL1);
+	printk(KERN_ERR "hs400 parameter: hs400_TX[1]=0x%x, hs400_RX[2]=0x%x,hs400_dqs[3]=0x%x\n",hs400_data[1],hs400_data[2],hs400_data[3]);
+	rtkemmc_send_cmd25(emmc_port, 512, emmc_port->emmc_tuning_addr/512-1024, 1, hs400_data);
+
 	up_write(&cr_rw_sem);
 
 	set_RTK_initial_flag(1);        //this flag is to use for sd card check for rcu stall
@@ -2789,14 +2822,15 @@ static void rtkemmc_chk_card_insert(struct rtkemmc_host *emmc_port)
         if (VP0_saved == 0xFF && VP1_saved == 0xFF){
                 HS200_TX = VP0_saved = (readl(emmc_port->crt_membase + SYS_PLL_EMMC1) & 0x000000f8) >> 3;
                 HS200_RX = VP1_saved = (readl(emmc_port->crt_membase + SYS_PLL_EMMC1) & 0x00001f00) >> 8;
-		if(emmc_port->tx_user_defined) {	//if we set user defined tx and rx value, then we won't use the bootcode reference value
-			HS200_TX = VP0_saved = emmc_port->tx_reference_phase;
-		}
-		if(emmc_port->rx_user_defined) {
-			HS200_RX = VP1_saved = emmc_port->rx_reference_phase;
-		}
         }
+
 #endif
+	if(emmc_port->tx_user_defined) {        //if we set user defined tx and rx value, then we won't use the bootcode reference value, always the first priority
+                HS200_TX = VP0_saved = emmc_port->tx_reference_phase;
+        }
+        if(emmc_port->rx_user_defined) {
+                HS200_RX = VP1_saved = emmc_port->rx_reference_phase;
+        }
 
 #ifdef DQS_INHERITED
 	if (dqs_saved == 0xff)
@@ -4213,6 +4247,7 @@ static int SD_Stream_Cmd(u16 cmdcode,struct sd_cmd_pkt *cmd_info, unsigned int b
 	cmd_info->emmc_port->test_count++;
 	mmcspec("test_count=%d\n",cmd_info->emmc_port->test_count);
 #endif
+
 	if ((g_crinit == 0)&&(cmd_idx > MMC_SET_RELATIVE_ADDR)) {
 		printk("%s : ignore cmd:0x%02x since we're still in emmc init stage\n",DRIVER_NAME,cmd_idx);
 		return CR_TRANSFER_FAIL;
@@ -4879,6 +4914,40 @@ static void rtkemmc_request(struct mmc_host *host, struct mmc_request *mrq)
 	emmc_port = mmc_priv(host);
 	BUG_ON(emmc_port->mrq != NULL);
 
+	if(mrq->cmd->opcode==MMC_SEND_EXT_CSD)
+	{
+		//====we add the following program becasue we need to read HS400 parameter in specific emmc block in SDR50 mode if exists====
+		//hs400 mode case, we need to eliminate the tuning process, so we read the dqs, phase data from offset that bootcode provided
+		if((host->caps2 & MMC_CAP2_HS400_1_8V) && emmc_port->dqs_tuning==1 && emmc_port->emmc_tuning_addr!=0)    //bootcode doesn't do the hs400 tuning
+		{
+			int hs400_data[128]={0};        //4 bytes header, 33aa, 4 bytes for TX, 4 bytes for RX, 4 bytes for dqs
+			rtkemmc_send_cmd18(emmc_port, 512, emmc_port->emmc_tuning_addr/512-1024);       //we put the hs400 parameter data after emmc hs400 1024 tuning patterns
+			memcpy(hs400_data, gddr_dma_org, 512);
+
+			printk(KERN_ERR "before cmd8, read dqs_data from emmc first for later usage: hs400_header=0x%x, hs400_TX=0x%x, hs400_RX=0x%x, hs400_dqs=0x%x\n",
+				hs400_data[0], hs400_data[1], hs400_data[2], hs400_data[3]);
+
+			if(hs400_data[0]==0x33aa) {     //inherit from emmc saved data instead of bootcode
+				emmc_port->dqs_tuning=0;
+				emmc_port->tx_tuning = 0;
+				emmc_port->rx_tuning = 0;
+
+				HS200_TX = VP0_saved = hs400_data[1];
+				HS200_RX = VP1_saved = hs400_data[2];
+				dqs_saved = hs400_data[3];
+
+				if(emmc_port->tx_user_defined) {        //if we set user defined tx and rx value, then we won't use the bootcode reference value, always the first priority
+					printk(KERN_ERR "tx_user_defined has been set, we still use user define value for usage\n");
+					HS200_TX = VP0_saved = emmc_port->tx_reference_phase;
+				}
+				if(emmc_port->rx_user_defined) {
+					printk(KERN_ERR "rx_user_defined has been set, we still use user define value for usage\n");
+					HS200_RX = VP1_saved = emmc_port->rx_reference_phase;
+				}
+			}
+		}
+	}
+
 	down_write(&cr_rw_sem);
 	cmd = mrq->cmd;
 	emmc_port->mrq = mrq;
@@ -5321,7 +5390,7 @@ static int rtkemmc_probe(struct platform_device *pdev)
 	setup_timer(&emmc_port->timer, rtkemmc_timeout_timer, (unsigned long)emmc_port);
 #endif
 	emmc_port->ops->set_crt_muxpad(emmc_port);
-	
+
 	if (emmc_port->ops->reset_card)
 		emmc_port->ops->reset_card(emmc_port);
 
