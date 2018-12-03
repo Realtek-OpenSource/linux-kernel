@@ -1,0 +1,1 @@
+cmd_net/sched/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o net/sched/built-in.o net/sched/sch_generic.o net/sched/sch_mq.o net/sched/sch_api.o net/sched/sch_blackhole.o net/sched/cls_api.o net/sched/act_api.o net/sched/sch_fifo.o net/sched/sch_cbq.o net/sched/sch_htb.o net/sched/sch_fq_codel.o net/sched/cls_u32.o net/sched/ematch.o net/sched/em_u32.o 

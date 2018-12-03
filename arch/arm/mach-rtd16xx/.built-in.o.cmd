@@ -1,0 +1,1 @@
+cmd_arch/arm/mach-rtd16xx/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o arch/arm/mach-rtd16xx/built-in.o arch/arm/mach-rtd16xx/rtd16xx.o arch/arm/mach-rtd16xx/platsmp.o arch/arm/mach-rtd16xx/headsmp.o 

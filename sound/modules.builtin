@@ -1,0 +1,12 @@
+kernel/sound/soundcore.ko
+kernel/sound/arm/snd-realtek-driver.ko
+kernel/sound/core/snd.ko
+kernel/sound/core/snd-hwdep.ko
+kernel/sound/core/snd-timer.ko
+kernel/sound/core/snd-hrtimer.ko
+kernel/sound/core/snd-pcm.ko
+kernel/sound/core/snd-rawmidi.ko
+kernel/sound/core/snd-compress.ko
+kernel/sound/soc/snd-soc-core.ko
+kernel/sound/usb/snd-usb-audio.ko
+kernel/sound/usb/snd-usbmidi-lib.ko

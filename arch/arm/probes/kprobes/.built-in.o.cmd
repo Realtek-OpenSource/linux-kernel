@@ -1,0 +1,1 @@
+cmd_arch/arm/probes/kprobes/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o arch/arm/probes/kprobes/built-in.o arch/arm/probes/kprobes/core.o arch/arm/probes/kprobes/actions-common.o arch/arm/probes/kprobes/checkers-common.o arch/arm/probes/kprobes/actions-arm.o arch/arm/probes/kprobes/checkers-arm.o 

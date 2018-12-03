@@ -1,0 +1,2 @@
+kernel/drivers/nvmem/nvmem_core.ko
+kernel/drivers/nvmem/nvmem_rtk-efuse.ko

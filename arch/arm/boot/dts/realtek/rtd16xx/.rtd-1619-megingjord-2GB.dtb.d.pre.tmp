@@ -1,0 +1,19 @@
+rtd-1619-megingjord-2GB.o: \
+ arch/arm/boot/dts/realtek/rtd16xx/rtd-1619-megingjord-2GB.dts \
+ arch/arm/boot/dts/include/dt-bindings/soc/rtd16xx,memory.h \
+ arch/arm/boot/dts/include/dt-bindings/soc/../../soc/realtek/memory.h \
+ arch/arm/boot/dts/realtek/rtd16xx/rtd-16xx.dtsi \
+ arch/arm/boot/dts/include/dt-bindings/interrupt-controller/irq.h \
+ arch/arm/boot/dts/include/dt-bindings/interrupt-controller/arm-gic.h \
+ arch/arm/boot/dts/include/dt-bindings/clock/rtk,clock-rtd16xx.h \
+ arch/arm/boot/dts/include/dt-bindings/reset/rtk,reset-rtd16xx.h \
+ arch/arm/boot/dts/include/dt-bindings/power/rtk,power-rtd16xx.h \
+ arch/arm/boot/dts/realtek/rtd16xx/rtd-16xx-pcie.dtsi \
+ arch/arm/boot/dts/realtek/rtd16xx/rtd-16xx-cpu-dvfs.dtsi \
+ arch/arm/boot/dts/include/dt-bindings/regulator/gmt,g22xx.h \
+ arch/arm/boot/dts/include/dt-bindings/regulator/anpec,apw8889.h \
+ arch/arm/boot/dts/include/dt-bindings/thermal/thermal.h \
+ arch/arm/boot/dts/realtek/rtd16xx/rtd-16xx-gpu-dvfs.dtsi \
+ arch/arm/boot/dts/realtek/rtd16xx/rtd-1619-irda.dtsi \
+ arch/arm/boot/dts/realtek/rtd16xx/rtd-1619-sata.dtsi \
+ arch/arm/boot/dts/realtek/rtd16xx/rtd-1619-usb.dtsi

@@ -1,0 +1,1 @@
+cmd_drivers/media/platform/rtk_dptx/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/media/platform/rtk_dptx/built-in.o drivers/media/platform/rtk_dptx/dptx_core.o drivers/media/platform/rtk_dptx/dptx_switch.o drivers/media/platform/rtk_dptx/dptx_hwapi.o drivers/media/platform/rtk_dptx/dptx_rpc.o drivers/media/platform/rtk_dptx/dptx_edid.o 

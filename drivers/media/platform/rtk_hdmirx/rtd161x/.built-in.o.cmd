@@ -1,0 +1,1 @@
+cmd_drivers/media/platform/rtk_hdmirx/rtd161x/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/media/platform/rtk_hdmirx/rtd161x/built-in.o drivers/media/platform/rtk_hdmirx/rtd161x/v4l2_hdmi_rx.o drivers/media/platform/rtk_hdmirx/rtd161x/rx_drv/built-in.o 

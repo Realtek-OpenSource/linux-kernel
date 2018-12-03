@@ -1,0 +1,3 @@
+kernel/drivers/usb/phy/phy-rtk-rle0599.ko
+kernel/drivers/usb/phy/phy-rtk-usb2.ko
+kernel/drivers/usb/phy/phy-rtk-usb3.ko

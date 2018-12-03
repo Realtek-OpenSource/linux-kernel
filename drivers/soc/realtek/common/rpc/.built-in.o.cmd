@@ -1,0 +1,1 @@
+cmd_drivers/soc/realtek/common/rpc/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/soc/realtek/common/rpc/built-in.o drivers/soc/realtek/common/rpc/rtk_rpc.o drivers/soc/realtek/common/rpc/rtk_rpc_intr.o drivers/soc/realtek/common/rpc/rtk_rpc_poll.o drivers/soc/realtek/common/rpc/rtk_rpc_kern.o 

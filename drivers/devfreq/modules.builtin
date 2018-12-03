@@ -1,0 +1,4 @@
+kernel/drivers/devfreq/governor_simpleondemand.ko
+kernel/drivers/devfreq/governor_ondemand.ko
+kernel/drivers/devfreq/governor_passive.ko
+kernel/drivers/devfreq/realtek/rtk-busfreq.ko

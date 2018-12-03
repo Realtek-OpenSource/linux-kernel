@@ -1,0 +1,1 @@
+cmd_drivers/thermal/thermal_sys.o := ccache arm-linux-gnueabi-ld -EL    -r -o drivers/thermal/thermal_sys.o drivers/thermal/thermal_core.o drivers/thermal/of-thermal.o drivers/thermal/step_wise.o drivers/thermal/power_allocator.o drivers/thermal/cpu_cooling.o drivers/thermal/devfreq_cooling.o 

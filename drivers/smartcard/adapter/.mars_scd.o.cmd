@@ -1,0 +1,1 @@
+cmd_drivers/smartcard/adapter/mars_scd.o := ccache arm-linux-gnueabi-ld -EL    -r -o drivers/smartcard/adapter/mars_scd.o drivers/smartcard/adapter/scd_mars.o drivers/smartcard/adapter/scd_mars_priv.o 

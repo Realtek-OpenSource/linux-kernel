@@ -1,0 +1,1 @@
+cmd_drivers/video/backlight/lcd.ko := ccache arm-linux-gnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -o drivers/video/backlight/lcd.ko drivers/video/backlight/lcd.o drivers/video/backlight/lcd.mod.o ;  true

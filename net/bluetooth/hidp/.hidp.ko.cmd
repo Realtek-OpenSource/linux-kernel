@@ -1,0 +1,1 @@
+cmd_net/bluetooth/hidp/hidp.ko := ccache arm-linux-gnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -o net/bluetooth/hidp/hidp.ko net/bluetooth/hidp/hidp.o net/bluetooth/hidp/hidp.mod.o ;  true

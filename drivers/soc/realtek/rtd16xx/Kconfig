@@ -1,0 +1,11 @@
+menu "RTD16xx Device Drivers"
+
+config THOR_PM_WORKARURD
+	bool "System restart workarurd"
+	depends on RTK_WATCHDOG
+	help
+	  For SQA test.
+
+source "drivers/soc/realtek/rtd16xx/rtk_ve/Kconfig"
+
+endmenu #RTD16xx Device Drivers

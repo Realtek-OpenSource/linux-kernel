@@ -1,0 +1,1 @@
+cmd_drivers/media/platform/rtk_cec/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/media/platform/rtk_cec/built-in.o drivers/media/platform/rtk_cec/cec_core.o drivers/media/platform/rtk_cec/cm_buff.o drivers/media/platform/rtk_cec/cec_dev.o drivers/media/platform/rtk_cec/adapter/built-in.o 

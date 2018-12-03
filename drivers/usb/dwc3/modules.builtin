@@ -1,0 +1,5 @@
+kernel/drivers/usb/dwc3/dwc3.ko
+kernel/drivers/usb/dwc3/dwc3-pci.ko
+kernel/drivers/usb/dwc3/dwc3-of-simple.ko
+kernel/drivers/usb/dwc3/dwc3-rtk.ko
+kernel/drivers/usb/dwc3/dwc3-rtk-type_c.ko

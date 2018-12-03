@@ -1,0 +1,3 @@
+kernel/drivers/media/platform/rtk_hdmirx/rtd161x/rx_drv/hdmiHdmi.ko
+kernel/drivers/media/platform/rtk_hdmirx/rtd161x/rx_drv/hdmiEDID.ko
+kernel/drivers/media/platform/rtk_hdmirx/rtd161x/rx_drv/hdmiPhy.ko

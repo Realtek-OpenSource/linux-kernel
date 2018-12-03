@@ -1,0 +1,2 @@
+kernel/drivers/power/supply/rtd1xxx_ac.ko
+kernel/drivers/power/supply/rtd1xxx_battery.ko

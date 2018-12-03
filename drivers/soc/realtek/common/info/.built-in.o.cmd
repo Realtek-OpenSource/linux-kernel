@@ -1,0 +1,1 @@
+cmd_drivers/soc/realtek/common/info/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/soc/realtek/common/info/built-in.o drivers/soc/realtek/common/info/info.o drivers/soc/realtek/common/info/info-pll-rtd1395.o 

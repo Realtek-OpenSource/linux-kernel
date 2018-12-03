@@ -1,0 +1,1 @@
+cmd_drivers/gpio/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/gpio/built-in.o drivers/gpio/devres.o drivers/gpio/gpiolib.o drivers/gpio/gpiolib-legacy.o drivers/gpio/gpiolib-of.o drivers/gpio/gpiolib-sysfs.o drivers/gpio/gpio-rtd16xx.o drivers/gpio/gpio-rtd16xx-suspend.o 

@@ -1,0 +1,2 @@
+kernel/drivers/of/of_pci.ko
+kernel/drivers/of/of_pci_irq.ko

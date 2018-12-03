@@ -1,0 +1,1 @@
+cmd_drivers/staging/android/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/staging/android/built-in.o drivers/staging/android/ion/built-in.o drivers/staging/android/ashmem.o drivers/staging/android/lowmemorykiller.o 

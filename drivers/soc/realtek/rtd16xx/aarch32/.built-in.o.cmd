@@ -1,0 +1,1 @@
+cmd_drivers/soc/realtek/rtd16xx/aarch32/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/soc/realtek/rtd16xx/aarch32/built-in.o drivers/soc/realtek/rtd16xx/aarch32/rtd16xx_cpu_wrapper.o drivers/soc/realtek/rtd16xx/aarch32/rtd16xx_cpu_hotplug.o 

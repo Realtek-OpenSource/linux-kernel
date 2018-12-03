@@ -1,0 +1,1 @@
+arch/arm/boot/dts/realtek/rtd16xx/rtd-1619-megingjord-2GB.dtb: arch/arm/boot/dts/realtek/rtd16xx/.rtd-1619-megingjord-2GB.dtb.dts.tmp arch/arm/boot/dts/realtek/rtd16xx/rtd-16xx-pinctrl.dtsi arch/arm/boot/dts/realtek/rtd16xx/rtd-16xx-hdmirxEDID.dtsi arch/arm/boot/dts/realtek/rtd16xx/rtd-16xx-sata.dtsi arch/arm/boot/dts/realtek/rtd16xx/rtd-16xx-usb.dtsi

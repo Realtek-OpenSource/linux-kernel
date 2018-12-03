@@ -1,0 +1,1 @@
+cmd_drivers/net/irda/realtek/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/net/irda/realtek/built-in.o drivers/net/irda/realtek/rtk_irda.o drivers/net/irda/realtek/comcast_decoder.o 

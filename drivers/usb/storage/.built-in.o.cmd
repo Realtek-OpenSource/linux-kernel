@@ -1,0 +1,1 @@
+cmd_drivers/usb/storage/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/usb/storage/built-in.o drivers/usb/storage/uas.o drivers/usb/storage/usb-storage.o drivers/usb/storage/ums-realtek.o 
