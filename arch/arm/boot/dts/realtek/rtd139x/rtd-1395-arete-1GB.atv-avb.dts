@@ -1,0 +1,7 @@
+#include "rtd-1395-arete-1GB.atv.dts"
+#include "rtd-139x-avb.dtsi"
+
+/ {
+	model= "Realtek_ARETE_1GB_AVB";
+};
+
