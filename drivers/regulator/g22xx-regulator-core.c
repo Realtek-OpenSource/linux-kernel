@@ -323,3 +323,43 @@ int g22xx_regulator_register(struct g22xx_device *gdev,
 }
 EXPORT_SYMBOL_GPL(g22xx_regulator_register);
 
+
+/* softoff */
+enum {
+	SOFTOFF_POWER_ON  = 0,
+	SOFTOFF_POWER_OFF = 1,
+};
+
+
+static struct regmap_field *g22xx_softoff;
+
+static void g22xx_pm_power_off(void)
+{
+	pr_emerg("%s: set softoff\n", __func__);
+	regmap_field_write(g22xx_softoff, SOFTOFF_POWER_OFF);
+}
+
+int g22xx_setup_pm_power_off(struct g22xx_device *gdev, u32 reg, u32 mask)
+{
+	struct device *dev = gdev->dev;
+
+	if (!of_device_is_system_power_controller(dev->of_node)) {
+		dev_info(dev, "not a system power controller\n");
+		return 0;
+	}
+
+	if (!pm_power_off) {
+		dev_err(dev, "pm_power_off is already assigned with %pf\n",
+			pm_power_off);
+		return -EINVAL;
+	}
+
+	g22xx_softoff = create_regmap_field(gdev, reg, mask);
+	if (IS_ERR(g22xx_softoff))
+		return PTR_ERR(g22xx_softoff);
+
+	pm_power_off = g22xx_pm_power_off;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(g22xx_setup_pm_power_off);
+

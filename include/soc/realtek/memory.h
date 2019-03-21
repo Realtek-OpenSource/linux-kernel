@@ -46,6 +46,10 @@
 #if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
 /* 0x0002f000 ~ 0x0001ffff */
 #define RPC_COMM_PHYS (0x0002F000)
+
+#elif defined(CONFIG_ARCH_RTD13xx)
+
+#define RPC_COMM_PHYS (0x0003F000)
 #else
 /* 0x0001f000 ~ 0x0001ffff */
 #define RPC_COMM_PHYS (0x0001F000)
@@ -96,10 +100,20 @@
 /* Kernel will resrved memory for TEE OS if kernel config is for 1GB ATV w/ DRM */
 #define TEE_OS_30MB_PHYS   (0x10100000)
 #define TEE_OS_30MB_SIZE   (0x01E00000)
+/* Kernel will resrved memory for TEE OS if kernel config is for Non DRM*/
+#define TEE_OS_SLIM_PHYS     (0x10100000)
+#if 1 /* non-drm enviromnet config */
+#define TEE_OS_SLIM_SIZE     (0x00f00000)
+#else /* tempary workaround */
+#define TEE_OS_SLIM_SIZE     (TEE_OS_SIZE)
+#endif
 /* For memtester tool */
 #define MEMTESTER_RSV_PHYS (0x22000000)
 #define MEMTESTER_RSV_SIZE (0x04000000)
 
+/* For HIF emmc memory reserve */
+#define HIF_EMMC_RSV_PHYS (0x08000000)
+#define HIF_EMMC_RSV_SIZE (0x01000000)
 
 #if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
 /* 0x14200000 ~ 0x1effffff */
@@ -128,8 +142,13 @@
 #define ACPU_BOOTCODE_PHYS (0x1FC00000)
 #define ACPU_BOOTCODE_SIZE (0x00001000)
 /* 0x32800000 ~ 0x3effffff */
+#ifdef CONFIG_RTK_VMX_DRM
+#define MEM_SLOT_PHYS_4 (0x32b00000)
+#define MEM_SLOT_SIZE_4 (0x15400000)
+#else
 #define MEM_SLOT_PHYS_4 (0x32b00000)
 #define MEM_SLOT_SIZE_4 (0x12c00000)
+#endif
 #define MEM_SLOT_FLAG_4 (RTK_FLAG_SCPUACC | RTK_FLAG_HWIPACC)
 /* 0x80000000 ~ 0x80007fff */
 #define PLAT_SECURE_PHYS (0x80000000)

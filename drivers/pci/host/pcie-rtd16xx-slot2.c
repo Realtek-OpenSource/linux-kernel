@@ -25,7 +25,6 @@
 #include <linux/resource.h>
 #include <linux/signal.h>
 #include <linux/types.h>
-#include <linux/reset-helper.h>
 #include <linux/reset.h>
 #include <linux/suspend.h>
 #include <linux/kthread.h>
@@ -54,6 +53,7 @@ static u32 pcie2_gpio;
 
 
 static u32 speed_mode;
+static u32 debug_mode;
 
 
 #define cfg_direct_access false
@@ -602,15 +602,17 @@ static int rtk_pcie2_16xx_hw_initial(struct device *dev)
 	if (pci_link_detected) {
 		dev_err(dev, "PCIE device has link up in slot 2\n");
 	} else {
-		reset_control_assert(rstn_pcie2_stitch);
-		reset_control_assert(rstn_pcie2);
-		reset_control_assert(rstn_pcie2_core);
-		reset_control_assert(rstn_pcie2_power);
-		reset_control_assert(rstn_pcie2_nonstitch);
-		reset_control_assert(rstn_pcie2_phy);
-		reset_control_assert(rstn_pcie2_phy_mdio);
+		if (!debug_mode) { /*do not turn off clk in debug mode*/
+			reset_control_assert(rstn_pcie2_stitch);
+			reset_control_assert(rstn_pcie2);
+			reset_control_assert(rstn_pcie2_core);
+			reset_control_assert(rstn_pcie2_power);
+			reset_control_assert(rstn_pcie2_nonstitch);
+			reset_control_assert(rstn_pcie2_phy);
+			reset_control_assert(rstn_pcie2_phy_mdio);
 
-		clk_disable_unprepare(pcie2_clk);
+			clk_disable_unprepare(pcie2_clk);
+		}
 		gpio_free(pcie2_gpio);
 
 		dev_err(dev, "PCIE device has link down in slot 2\n");
@@ -640,10 +642,13 @@ static int rtk_pcie2_16xx_hw_initial(struct device *dev)
 	/* #translate for MMIO R/W */
 	rtk_pcie2_16xx_ctrl_write(0xD04, 0x00000000);
 
-
+#ifdef CONFIG_R8125
+	/*pcie timeout extend to 250us*/
+	rtk_pcie2_16xx_ctrl_write(0xC78, 0x7A1201);
+#else
 	/* prevent pcie hang if dllp error occur*/
 	rtk_pcie2_16xx_ctrl_write(0xC78, 0x200001);
-
+#endif
 	/* set limit and base register */
 	rtk_pcie2_16xx_ctrl_write(0x20, 0x0000FFF0);
 	rtk_pcie2_16xx_ctrl_write(0x24, 0x0000FFF0);
@@ -655,8 +660,9 @@ static int rtk_pcie2_16xx_probe(struct platform_device *pdev)
 {
 	int ret = 0;
 	int size = 0;
-	const u32 *prop;
+	const u32 *prop, *prop2;
 	struct resource pcie_mmio_res;
+	struct pci_dev *dev;
 
 	resource_size_t iobase = 0;
 	LIST_HEAD(res);
@@ -676,6 +682,17 @@ static int rtk_pcie2_16xx_probe(struct platform_device *pdev)
 			dev_info(&pdev->dev, "Speed Mode: GEN2\n");
 	} else {
 		speed_mode = 0;
+	}
+
+	prop2 = of_get_property(pdev->dev.of_node, "debug-mode", &size);
+	if (prop2) {
+		debug_mode = of_read_number(prop2, 1);
+		if (debug_mode == 0)
+			dev_info(&pdev->dev, "PCIE Debug Mode off\n");
+		else if (debug_mode == 1)
+			dev_info(&pdev->dev, "PCIE Debug Mode on\n");
+	} else {
+		debug_mode = 0;
 	}
 
 	PCIE_CTRL_BASE = of_iomap(pdev->dev.of_node, 0);
@@ -801,6 +818,13 @@ static int rtk_pcie2_16xx_probe(struct platform_device *pdev)
 	pci_scan_child_bus(bus);
 	pci_assign_unassigned_bus_resources(bus);
 	pci_bus_add_devices(bus);
+
+
+#if defined(CONFIG_CPU_V7)
+	list_for_each_entry(dev, &bus->devices, bus_list) {
+		dev->irq = of_irq_parse_and_map_pci(dev, 0, 0);
+	}
+#endif
 
 	dev_info(&pdev->dev, "PCIE host driver initial done.\n");
 

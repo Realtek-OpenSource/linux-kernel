@@ -33,6 +33,7 @@
 #define APW8889_REG_DC4_SLPVOLT         (0x14)
 #define APW8889_REG_DC6_SLPVOLT         (0x15)
 #define APW8889_REG_LDO1_SLPVOLT        (0x16)
+#define APW8889_REG_CLAMP               (0x17)
 
 /* misc registers */
 #define APW8889_REG_CHIP_ID             (0x1D)
@@ -166,5 +167,15 @@
 #define APW8889_LDO1_SLPVOLT_SHIFT      (0)
 #define APW8889_LDO1_SLPVOLT_WIDTH      (6)
 
+/* register field: CLAMP */
+#define APW8889_DC2_CLAMP_MASK          (0x4)
+#define APW8889_DC2_CLAMP_SHIFT         (2)
+#define APW8889_DC2_CLAMP_WIDTH         (1)
+#define APW8889_DC3_CLAMP_MASK          (0x2)
+#define APW8889_DC3_CLAMP_SHIFT         (1)
+#define APW8889_DC3_CLAMP_WIDTH         (1)
+#define APW8889_DC4_CLAMP_MASK          (0x1)
+#define APW8889_DC4_CLAMP_SHIFT         (0)
+#define APW8889_DC4_CLAMP_WIDTH         (1)
 
 #endif /* __LINUX_MFD_APW8889_H */

@@ -230,6 +230,8 @@ void hdmi_init(void)
 	lib_hdmi_valid_format_condition();
 	lib_hdmi_misc_variable_initial();
 
+	Hdmi_HdcpInit();
+
 	HDMIRX_INFO("%s done\n", __func__);
 
 }
@@ -1624,7 +1626,7 @@ unsigned char hdmi_audio_detect(void)
 		SET_H_AUDIO_FSM(AUDIO_FSM_AUDIO_CHECK);
 		result = TRUE;
 
-		hdmi_rx.audio_t.coding_type = lib_hdmi_audio_is_nonpcm();
+		hdmi_rx.audio_t.coding_type = lib_hdmi_audio_get_format();
 		hdmi_rx.audio_t.audio_freq = spdif_freq;
 		hdmirx_state.audio_detect_done = 1;
 
@@ -1642,10 +1644,10 @@ unsigned char hdmi_audio_detect(void)
 			SET_H_AUDIO_FSM(AUDIO_FSM_AUDIO_START);
 		}
 
-		if (hdmi_rx.audio_t.coding_type != lib_hdmi_audio_is_nonpcm()) {
+		if (hdmi_rx.audio_t.coding_type != lib_hdmi_audio_get_format()) {
 			lib_hdmi_audio_output(0);
 			SET_H_AUDIO_FSM(AUDIO_FSM_AUDIO_START);
-			HDMI_PRINTF("Audio Type change=%d\n", lib_hdmi_audio_is_nonpcm());
+			HDMI_PRINTF("Audio Type change=%d\n", lib_hdmi_audio_get_format());
 		}
 
 		if (GET_H_AUDIO_FSM() == AUDIO_FSM_AUDIO_START)
@@ -1752,23 +1754,11 @@ void Hdmi_SetHPD(char high)
 {
 	HDMIRX_INFO("Set HPD(%u)", high);
 
-	if (high) {
-#if HDMI2p0
-		hdmi_rx_reg_mask32(HDMI_SCDC_CR,
-			~HDMI_SCDC_CR_scdc_reset_mask, 0, HDMI_RX_MAC);
-#endif
-
+	if (high)
 		gpio_direction_output(hdmi_rx.gpio_hpd_ctrl, 0);
-
-	} else {
-#if HDMI2p0
-		hdmi_rx_reg_mask32(HDMI_SCDC_CR,
-			~HDMI_SCDC_CR_scdc_reset_mask,
-			HDMI_SCDC_CR_scdc_reset_mask, HDMI_RX_MAC);
-#endif
-
+	else
 		gpio_direction_output(hdmi_rx.gpio_hpd_ctrl, 1);
-	}
+
 }
 
 
@@ -3822,9 +3812,37 @@ void lib_hdmi_audio_init(void)
 
 }
 
-unsigned char lib_hdmi_audio_is_nonpcm(void)
+
+/**
+ * lib_hdmi_audio_get_type - Get audio type
+ *
+ * Return:
+ *   0 - PCM
+ *   1 - Non-PCM(RAW)
+ *   2 - HBR
+ */
+unsigned char lib_hdmi_audio_get_format(void)
 {
-	return HDMI_SR_get_spdiftype(hdmi_rx_reg_read32(HDMI_SR, HDMI_RX_MAC));
+	unsigned int reg_val;
+	unsigned char is_nonpcm;
+	unsigned char is_hbr;
+	unsigned char audio_type;
+
+	is_nonpcm = HDMI_SR_get_spdiftype(hdmi_rx_reg_read32(HDMI_SR, HDMI_RX_MAC));
+
+	if (is_nonpcm) {
+		reg_val = hdmi_rx_reg_read32(HDMI_HIGH_BIT_RATE_AUDIO_PACKET, HDMI_RX_MAC);
+		is_hbr = HDMI_HIGH_BIT_RATE_AUDIO_PACKET_get_hbr_audio_mode(reg_val);
+
+		if (is_hbr)
+			audio_type = AUDIO_FORMAT_HBR;
+		else
+			audio_type = AUDIO_FORMAT_NONLPCM;
+	} else {
+		audio_type = AUDIO_FORMAT_LPCM;
+	}
+
+	return audio_type;
 }
 
 void lib_hdmi_audio_pop_n_cts(void)

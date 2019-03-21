@@ -157,9 +157,10 @@ static int phy_rtk_sata_init(struct phy *phy)
 	for (i = 0; i < desc->param_size; i++)
 		writel_delay(desc->param_table[i], base);
 
-	for (i = 0; i < desc->txdrv_size; i++)
-		writel_delay(desc->txdrv_table[i], base);
-
+	if (priv->chip_id != CHIP_ID_RTD1619) {
+		for (i = 0; i < desc->txdrv_size; i++)
+			writel_delay(desc->txdrv_table[i], base);
+	}
 	if (desc->ssc_en) {
 		table = (unsigned int *)&SSCEN_SET_TABLE;
 		size = sizeof(SSCEN_SET_TABLE)/sizeof(unsigned int);

@@ -57,12 +57,6 @@ static struct task_struct *hdmitx_hpd_tsk;
 #define RX_SENSE_COUNT_MAX 2
 #endif
 
-static ssize_t hdmitx_switch_print_state(struct switch_dev *sdev, char *buffer)
-{
-	HDMI_DEBUG("hdmitx_switch_print_state");
-	return sprintf(buffer, "%d", s_data.state);
-}
-
 int hdmitx_switch_get_state(void)
 {
 	return s_data.state;
@@ -220,9 +214,7 @@ int register_hdmitx_switchdev(hdmitx_device_t *device)
 		return -ENOMEM;
 
 	sdev = &device->sdev;
-
 	sdev->name = HDMI_SWITCH_NAME;
-	sdev->print_state = hdmitx_switch_print_state;
 
 	ret = switch_dev_register(sdev);
 	if (ret < 0) {

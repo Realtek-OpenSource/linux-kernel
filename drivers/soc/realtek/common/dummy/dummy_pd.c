@@ -3,11 +3,10 @@
 #include <linux/pm_runtime.h>
 #include <linux/of.h>
 
-#include "../pwrctrl/pwrctrl-pd.h"
+#include "pwrctrl-pd.h"
 
 struct dummy_pd dummy_pd0 = {
 	.core = {
-		.init = dummy_pd_init,
 		.pd.name = "dummy_pd_0",
 		.pc.name = "pctrl_dummy_pd_0",
 		.pc.ops = &dummy_ops,
@@ -16,7 +15,6 @@ struct dummy_pd dummy_pd0 = {
 
 struct dummy_pd dummy_pd1 = {
 	.core = {
-		.init = dummy_pd_init,
 		.pd.name = "dummy_pd_1",
 		.pc.name = "pctrl_dummy_pd_1",
 		.pc.ops = &dummy_ops,

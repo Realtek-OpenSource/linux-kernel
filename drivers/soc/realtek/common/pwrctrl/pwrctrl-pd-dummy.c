@@ -13,40 +13,35 @@
 #include "pwrctrl_driver.h"
 #include "pwrctrl-pd.h"
 
-static int dummy_power_on(struct power_control *pctrl)
+static int dummy_power_on(struct power_control *pwrctrl)
 {
-	struct dummy_pd *dpd = pc_to_dummy_pd(pctrl);
+	struct dummy_pd *dpd = pc_to_dummy_pd(pwrctrl);
 
-	pr_info("%s: %s\n", pctrl->name, __func__);
+	pr_info("%s: %s\n", pwrctrl->name, __func__);
 	dpd->on = 1;
 	return 0;
 }
 
-static int dummy_power_off(struct power_control *pctrl)
+static int dummy_power_off(struct power_control *pwrctrl)
 {
-	struct dummy_pd *dpd = pc_to_dummy_pd(pctrl);
+	struct dummy_pd *dpd = pc_to_dummy_pd(pwrctrl);
 
-	pr_info("%s: %s\n", pctrl->name, __func__);
+	pr_info("%s: %s\n", pwrctrl->name, __func__);
 	dpd->on = 0;
 	return 0;
 }
 
-static int dummy_is_powered_on(struct power_control *pctrl)
+static int dummy_is_powered_on(struct power_control *pwrctrl)
 {
-	struct dummy_pd *dpd = pc_to_dummy_pd(pctrl);
+	struct dummy_pd *dpd = pc_to_dummy_pd(pwrctrl);
 
-	pr_info("%s: %s\n", pctrl->name, __func__);
+	pr_info("%s: %s\n", pwrctrl->name, __func__);
 	return dpd->on == 1;
 }
 
-int dummy_pd_init(struct pwrctrl_pd *pd, void *initdata)
-{
-	return 0;
-}
-
 const struct power_control_ops dummy_ops = {
-	.power_off = dummy_power_off,
-	.power_on = dummy_power_on,
+	.power_off     = dummy_power_off,
+	.power_on      = dummy_power_on,
 	.is_powered_on = dummy_is_powered_on,
 };
 

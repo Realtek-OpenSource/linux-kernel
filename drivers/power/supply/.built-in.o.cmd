@@ -1,1 +1,0 @@
-cmd_drivers/power/supply/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/power/supply/built-in.o drivers/power/supply/power_supply.o drivers/power/supply/rtd1xxx_ac.o drivers/power/supply/rtd1xxx_battery.o 

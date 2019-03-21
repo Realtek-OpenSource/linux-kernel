@@ -1,1 +1,0 @@
-cmd_include/generated/mach-types.h := mkdir -p include/generated/ && awk -f arch/arm/tools/gen-mach-types arch/arm/tools/mach-types > include/generated/mach-types.h || { rm -f include/generated/mach-types.h; /bin/false; }

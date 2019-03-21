@@ -354,6 +354,7 @@ void restartHdmiRxWrapperDetection(void)
 	set_hdmirx_wrapper_interrupt_en(0, 0, 0);
 	SET_H_VIDEO_FSM(MAIN_FSM_HDMI_SETUP_VEDIO_PLL);
 	SET_H_AUDIO_FSM(AUDIO_FSM_AUDIO_START);
+	rxphy_init_struct();/* Reset phy state */
 	set_hdmirx_wrapper_control_0(-1, 0, -1, -1, -1, -1);/* Stop DMA */
 	set_hdmirx_wrapper_hor_threshold(HDMI_MIN_SUPPORT_H_PIXEL);
 

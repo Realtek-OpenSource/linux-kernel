@@ -464,6 +464,8 @@ static long v4l2_hdmi_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 			hdmi_update_audiopkt();
 			memset(info_packet, 0, sizeof(struct infoframe_packet));
 			memcpy(info_packet, &hdmi_rx.audiopkt_t, sizeof(hdmi_rx.audiopkt_t));
+			/* Put Audio Type to last byte of data_byte  */
+			info_packet->data_byte[28] = hdmi_rx.audio_t.coding_type;
 		}
 		break;
 	}
@@ -601,7 +603,7 @@ static ssize_t show_hdmirx_video_info(struct device *cd, struct device_attribute
 	return ret_count;
 }
 
-static const char * const lpcm[] = {"LPCM", "Non-LPCM", "N/A"};
+static const char * const lpcm[] = {"LPCM", "Non-LPCM", "HBR", "N/A"};
 static const char * const coding_type[] = {
 	"Stream Header", "L-PCM", "AC3", "MPEG-1",
 	"MP3", "MPEG2", "AAC LC", "DTS",
@@ -631,7 +633,7 @@ static ssize_t show_hdmirx_audio_info(struct device *cd,
 	ssize_t ret_count;
 	unsigned int audio_ready = 0;
 	unsigned int freq = 0;
-	unsigned int lpcm_index = 2;
+	unsigned int lpcm_index = 3;
 	unsigned char ct_index;
 	unsigned char cc_index;
 	unsigned char sf_index;
@@ -641,7 +643,7 @@ static ssize_t show_hdmirx_audio_info(struct device *cd,
 
 	if (audio_ready) {
 		freq = hdmi_rx.audio_t.audio_freq;;
-		lpcm_index = hdmi_rx.audio_t.coding_type&0x1;
+		lpcm_index = hdmi_rx.audio_t.coding_type&0x3;
 		hdmi_update_audiopkt();
 	}
 

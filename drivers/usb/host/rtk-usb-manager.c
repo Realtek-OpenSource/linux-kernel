@@ -20,7 +20,6 @@
 #include <linux/of_address.h>
 #include <linux/of_gpio.h>
 #include <linux/of_platform.h>
-#include <linux/reset-helper.h> // rstc_get
 #include <linux/reset.h>
 #include <linux/clk.h>   // clk_get
 #include <linux/clk-provider.h>

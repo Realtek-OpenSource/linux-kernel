@@ -70,12 +70,11 @@
 
 			regulator-boot-on;
 			regulator-always-on;
-			regulator-initial-mode = <G22XX_DC_MODE_FORCE_PWM>;
+			regulator-initial-mode = <G22XX_DC_MODE_AUTO>;
 			regulator-state-mem {
 				regulator-on-in-suspend;
 				regulator-suspend-microvolt = <3200000>;
 			};
-
 		};
 		gpu_supp_0: dc2 {
 			regulator-name = "gpudvs";
@@ -146,17 +145,16 @@
 
 			regulator-boot-on;
 			regulator-always-on;
-			regulator-initial-mode = <APW8889_DC_MODE_FORCE_PWM>;
+			regulator-initial-mode = <APW8889_DC_MODE_AUTO>;
 			regulator-state-mem {
 				regulator-on-in-suspend;
 				regulator-suspend-microvolt = <3200000>;
 			};
-
 		};
 		dc2 {
 			regulator-name = "core";
-			regulator-min-microvolt = <400000>;
-			regulator-max-microvolt = <1187500>;
+			regulator-min-microvolt = <550000>;
+			regulator-max-microvolt = <1337500>;
 
 			regulator-boot-on;
 			regulator-always-on;
@@ -168,8 +166,8 @@
 		};
 		cpu_supp_1: dc3 {
 			regulator-name = "cpudvs";
-			regulator-min-microvolt = <400000>;
-			regulator-max-microvolt = <1187500>;
+			regulator-min-microvolt = <550000>;
+			regulator-max-microvolt = <1337500>;
 
 			regulator-boot-on;
 			regulator-always-on;
@@ -181,8 +179,8 @@
 		};
 		gpu_supp_1: dc4 {
 			regulator-name = "gpudvs";
-			regulator-min-microvolt = <400000>;
-			regulator-max-microvolt = <1187500>;
+			regulator-min-microvolt = <550000>;
+			regulator-max-microvolt = <1337500>;
 
 			regulator-boot-on;
 			regulator-always-on;
@@ -278,7 +276,7 @@
 
 /* cpu opp table */
 &dvfs {
-	hlb-enable;
+	hlb-disable;
 	hlb-polling-ms = <250>;
 	status = "okay";
 
@@ -287,25 +285,25 @@
 		opp-shared;
 		opp300: opp-300mhz {
 			opp-hz = /bits/ 64 <300000000>;
-			opp-microvolt = <812500>;
+			opp-microvolt = <787500>;
 			clock-latency-ns = <150000>;
 			status = "okay";
 		};
 		opp400: opp-400mhz {
 			opp-hz = /bits/ 64 <400000000>;
-			opp-microvolt = <812500>;
+			opp-microvolt = <787500>;
 			clock-latency-ns = <150000>;
 			status = "okay";
 		};
 		opp500: opp-500mhz {
 			opp-hz = /bits/ 64 <500000000>;
-			opp-microvolt = <812500>;
+			opp-microvolt = <787500>;
 			clock-latency-ns = <150000>;
 			status = "okay";
 		};
 		opp600: opp-600mhz {
 			opp-hz = /bits/ 64 <600000000>;
-			opp-microvolt = <812500>;
+			opp-microvolt = <787500>;
 			clock-latency-ns = <150000>;
 			status = "okay";
 		};

@@ -50,7 +50,7 @@
 #include "../rtk_fb.h"
 #include "dc2vo.h"
 
-static int debug = 0;
+static int debug = 1;
 static int warning = 1;
 static int info = 1;
 
@@ -112,6 +112,7 @@ typedef struct {
 	REFCLOCK *REF_CLK;
 	RINGBUFFER_HEADER *RING_HEADER;
 	void *RING_HEADER_BASE;
+    long long vo_instance_id;
 	struct ion_client *gpsIONClient;
 	unsigned int gAlpha; /* [0]:Pixel Alpha	[0x01 ~ 0xFF]:Global Alpha */
 
@@ -172,6 +173,8 @@ enum {
 	VSYNC_FORCE_LOCK		= (1U << 7),
 };
 
+static ktime_t  dc_read_vsync_timestamp     (DC_INFO *pdc_info);
+static void     dc_write_vsync_timestamp    (DC_INFO *pdc_info, ktime_t timestamp);
 inline long	 dc_wait_vsync_timeout	   (DC_INFO *pdc_info);
 void			dc_update_vsync_timestamp   (DC_INFO *pdc_info);
 static int dc_do_simple_post_config(VENUSFB_MACH_INFO * video_info, void *arg);
@@ -322,7 +325,6 @@ EXPORT_SYMBOL(DC_VsyncWait);
 int DC_Wait_Vsync(struct fb_info *fb, VENUSFB_MACH_INFO * video_info, unsigned long long *nsecs)
 {
 	DC_INFO * pdc_info = (DC_INFO*)video_info->dc_info;
-	unsigned long flags;
 	DC_UNREFERENCED_PARAMETER (pdc_info);
 	DC_UNREFERENCED_PARAMETER (fb);
 	DC_UNREFERENCED_PARAMETER (video_info);
@@ -338,9 +340,7 @@ int DC_Wait_Vsync(struct fb_info *fb, VENUSFB_MACH_INFO * video_info, unsigned l
 #if 0
 	*nsecs = ktime_to_ns(ktime_get());
 #else
-	read_lock_irqsave(&pdc_info->vsync_lock, flags);
-	*nsecs = ktime_to_ns(pdc_info->vsync_timestamp);
-	read_unlock_irqrestore(&pdc_info->vsync_lock, flags);
+	*nsecs = ktime_to_ns(dc_read_vsync_timestamp(pdc_info));
 #endif
 	return 0;
 }
@@ -684,8 +684,23 @@ int DC_Ioctl (struct fb_info *fb, VENUSFB_MACH_INFO *video_info,
 				goERROR(0);
 			if (DC_Set_ION_Share_Memory(fb, video_info, &param) != 0)
 				goERROR(0);
+
+            {
+                DC_INFO * pdc_info = (DC_INFO*)video_info->dc_info;
+                pdc_info->vo_instance_id = param.vo_instance_id;
+            }
 			break;
 		}
+    case DC2VO_GET_VO_INSTANCE_INFO:
+        {
+            DC_INFO * pdc_info = (DC_INFO*)video_info->dc_info;
+            DC_VO_INSTANCE_INFO param;
+            memset(&param, 0, sizeof(param));
+            param.vo_instance_id = pdc_info->vo_instance_id;
+			if(copy_to_user((void *)arg, &param, sizeof(param)) != 0)
+				goERROR(0);
+            break;
+        }
 	case DC2VO_SET_BUFFER_INFO:
 		{
 			DC_BUFFER_INFO param;
@@ -859,19 +874,35 @@ int DeInit_vSync(VENUSFB_MACH_INFO * video_info)
 	return 0;
 }
 
+static ktime_t dc_read_vsync_timestamp(DC_INFO *pdc_info)
+{
+    unsigned long flags;
+    ktime_t		 timestamp;
+    read_lock_irqsave(&pdc_info->vsync_lock, flags);
+    timestamp = pdc_info->vsync_timestamp;
+    read_unlock_irqrestore(&pdc_info->vsync_lock, flags);
+    return timestamp;
+}
+
+static void dc_write_vsync_timestamp(DC_INFO *pdc_info, ktime_t timestamp)
+{
+    unsigned long flags;
+    write_lock_irqsave(&pdc_info->vsync_lock, flags);
+    pdc_info->vsync_timestamp = timestamp;
+    write_unlock_irqrestore(&pdc_info->vsync_lock, flags);
+    return;
+}
+
 long dc_wait_vsync_timeout(DC_INFO *pdc_info)
 {
     long ret = 0;
-	unsigned long   flags;
 	ktime_t		 timestamp;
 	long			timeout;
 
-	read_lock_irqsave(&pdc_info->vsync_lock, flags);
-	timestamp = pdc_info->vsync_timestamp;
-	read_unlock_irqrestore(&pdc_info->vsync_lock, flags);
+	timestamp = dc_read_vsync_timestamp(pdc_info);
 
 	timeout = wait_event_interruptible_hrtimeout(pdc_info->vsync_wait,
-			!ktime_equal(timestamp, pdc_info->vsync_timestamp),
+			!ktime_equal(timestamp, dc_read_vsync_timestamp(pdc_info)),
             ktime_set( 0, (pdc_info->vsync_timeout_ms * NSEC_PER_MSEC)));
 
 	if (timeout ==  -ETIME) {
@@ -886,12 +917,7 @@ long dc_wait_vsync_timeout(DC_INFO *pdc_info)
 
 void dc_update_vsync_timestamp(DC_INFO *pdc_info)
 {
-	unsigned long flags;
-
-	write_lock_irqsave(&pdc_info->vsync_lock, flags);
-	pdc_info->vsync_timestamp = ktime_get();
-	write_unlock_irqrestore(&pdc_info->vsync_lock, flags);
-
+    dc_write_vsync_timestamp(pdc_info, ktime_get());
 	wake_up_interruptible_all(&pdc_info->vsync_wait);
 }
 
@@ -1688,6 +1714,7 @@ static void dc_free_work_func(struct kthread_work *work)
 int Init_post_Worker(VENUSFB_MACH_INFO * video_info)
 {
 	DC_INFO * pdc_info = (DC_INFO*)video_info->dc_info;
+    struct sched_param param = { .sched_priority = MAX_RT_PRIO - 1 };
 
 	INIT_LIST_HEAD(&pdc_info->post_list);
 	INIT_LIST_HEAD(&pdc_info->complete_list);
@@ -1706,13 +1733,16 @@ int Init_post_Worker(VENUSFB_MACH_INFO * video_info)
 
 	pdc_info->post_thread = kthread_run(kthread_worker_fn,
 			&pdc_info->post_worker, "rtk_post_worker");
+    sched_setscheduler(pdc_info->post_thread , SCHED_FIFO, &param);
 
 	pdc_info->complete_thread = kthread_run(kthread_worker_fn,
 			&pdc_info->complete_worker, "rtk_complete_worker");
+    sched_setscheduler(pdc_info->complete_thread , SCHED_FIFO, &param);
 
 #ifdef CREATE_THREAD_FOR_RELEASE_DEBUG
 	pdc_info->free_thread = kthread_run(kthread_worker_fn,
 			&pdc_info->free_worker, "rtk_complete_worker");
+    sched_setscheduler(pdc_info->free_thread , SCHED_FIFO, &param);
 #endif /* End of CREATE_THREAD_FOR_RELEASE_DEBUG */
 
 	if (IS_ERR(pdc_info->post_thread)) {
@@ -1827,6 +1857,7 @@ int DC_Init(VENUSFB_MACH_INFO * video_info, struct fb_info *fbi, int irq)
 		pdc_info->pfbi = fbi;
 		pdc_info->vo_vsync_flag = &ipc->vo_int_sync;
 		pdc_info->irq = irq;
+		rwlock_init(&pdc_info->vsync_lock);
 
 #ifdef CONFIG_RTK_RPC
 		gpdc_info = (DC_INFO*)video_info->dc_info;

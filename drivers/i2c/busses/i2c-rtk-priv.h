@@ -34,6 +34,10 @@
 
 #define I2C_ID_MASK 0x3B
 
+#elif defined(CONFIG_ARCH_RTD13xx)
+
+#define I2C_ID_MASK 0x3B
+
 #endif
 
 
@@ -76,7 +80,7 @@
 #define rd_reg(x) readl((unsigned int *)x)
 #define SET_I2C_ISR(adp, x) wr_reg(adp->reg_map.I2C_ISR, x)
 #define GET_I2C_ISR(adp) rd_reg(adp->reg_map.I2C_ISR)
-#ifndef CONFIG_ARCH_RTD16xx
+#ifndef CONFIG_I2C_RTK_SECURE_ACCESS
 #define SET_IC_ENABLE(adp, x) wr_reg(adp->reg_map.IC_ENABLE, x)
 #endif
 #define GET_IC_ENABLE(adp) rd_reg(adp->reg_map.IC_ENABLE)

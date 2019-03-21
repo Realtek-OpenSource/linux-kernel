@@ -79,7 +79,8 @@ void rtk_cpu_power_up(int cpu)
 	 * Request Power Mode to ON */
 	tmp = readl(scpu_wrap_addr + (0x540 + cpu_offset));
 	tmp &= 0x0000003F;
-	tmp |= 0x00000008;
+	writel(tmp, scpu_wrap_addr + (0x540 + cpu_offset));
+	tmp |= 0x01000008;
 	writel(tmp, scpu_wrap_addr + (0x540 + cpu_offset));
 
 	/* 4. De-assert CPU cores resets. */
@@ -200,11 +201,11 @@ static int set_l4_icg(void *base)
 	writel(val, scpu_wrap_addr + 0x000);
 
 	val = readl(scpu_wrap_addr + 0x030);
-	val |= 0x2000000;
+	val |= 0x02000000;
 	writel(val, scpu_wrap_addr + 0x030);
 
 	val = readl(scpu_wrap_addr + 0x100);
-	val |= 0xC000000;
+	val |= 0xC0000000;
 	writel(val, scpu_wrap_addr + 0x100);
 
 	return 0;

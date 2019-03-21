@@ -1,1 +1,0 @@
-cmd_drivers/media/platform/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/media/platform/built-in.o drivers/media/platform/omap/built-in.o drivers/media/platform/rtk_hdmitx/built-in.o drivers/media/platform/rtk_hdmirx/rtd161x/built-in.o drivers/media/platform/rtk_cec/built-in.o drivers/media/platform/rtk_dptx/built-in.o 

@@ -162,7 +162,7 @@ int mini_SD = 0;
 bool broken_flag = false;
 u32 g_ro = 0;
 int irq_error_bit=1;
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 int clk_disabled=0;
 bool re_initialize = false;
 void rtk_sdmmc_open_clk(struct mmc_host *host);
@@ -216,13 +216,13 @@ void card_broken(struct rtk_sdmmc_host *rtk_host)
 	rtk_host->ops->card_power(rtk_host, 0);
 	rtk_sdmmc_sync(rtk_host);
 }
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 void remove_sdcard(struct rtk_sdmmc_host *rtk_host)
 {
         void __iomem *sdmmc_base = rtk_host->sdmmc;
         void __iomem *isopad_base = rtk_host->isopad;
         u32 det_time = 0;
-#ifdef CONFIG_ARCH_RTD16xx
+#if defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	unsigned int tmp = 0;
 #endif
 
@@ -232,7 +232,7 @@ void remove_sdcard(struct rtk_sdmmc_host *rtk_host)
 
 	if(down_trylock(&cr_sd_sem)!=0);	//check if the lock is occupied, if not, then occupied
 	up(&cr_sd_sem);				//release the lock
-#if defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	tmp = (0x3fc3fc3 << 4) | (readl(isopad_base + 0xc) & 0xf);
 	writel(tmp,isopad_base + 0xc);
 
@@ -306,7 +306,7 @@ void remove_sdcard(struct rtk_sdmmc_host *rtk_host)
 	remove_sdcard(rtk_global_host);
 	return 0;
 }*/
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 static void rtk_sdmmc_shutdown(struct platform_device *pdev)
 {
 	u32 det_time = 0;
@@ -322,7 +322,7 @@ static void rtk_sdmmc_shutdown(struct platform_device *pdev)
 	del_timer_sync(&rtk_host->plug_timer);
 #endif
 	pm_runtime_force_suspend(dev);
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	reginfo = readl(rtk_host->gpiodir+GPDATI1);
 	if(!(reginfo & 0x8)) {
 #else
@@ -381,7 +381,7 @@ static int rtk_sdmmc_pm_suspend(struct device *dev)
 #endif
 
 	ret = pm_runtime_force_suspend(dev);
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	reginfo = readl(rtk_host->gpiodir+GPDATI1);
         if(!(reginfo & 0x8)) {
 #else
@@ -440,7 +440,7 @@ static int rtk_sdmmc_pm_resume(struct device *dev)
 	else
 		printk(KERN_ERR "[SD] Realtek SD card reader resume OK!!\n");
 
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	re_initialize = false;
 	//in 1395 platform, system will turn off the SD clock if there is no SD card. Therefore, we must add this check for fear that invalid address access
 	reginfo = readl(rtk_host->gpiodir+GPDATI1);
@@ -468,7 +468,7 @@ static int rtk_sdmmc_pm_resume(struct device *dev)
 	else
 		rtk_sdmmc_hw_initial(rtk_host); //suspend will cause poweroff and the SD PLL will be set as default, so we need to initial the SD PLL and clock before resume
 
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
         reginfo = readl(rtk_host->gpiodir+GPDATI1);
         if(!(reginfo & 0x8) && suspend_SD_insert_flag==true) {
 #else
@@ -514,7 +514,7 @@ static int rtk_sdmmc_pm_resume(struct device *dev)
 	mod_timer(&rtk_host->plug_timer, jiffies + 3*HZ);
 #endif
 
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	if(re_initialize==true) {	//this case is to handle that SD card is plugged during suspend
 		rtk_sdmmc_get_cd(mmc);
 		re_initialize = false;
@@ -522,7 +522,7 @@ static int rtk_sdmmc_pm_resume(struct device *dev)
 #endif
 	suspend_flag=false;
 
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	//in 1395 platform, we turn on the clk in the begining of resume process if no SD card, we have to close the clk after resume
         if(reginfo & 0x8) {
                 writel(0x00000000, pll_base + CR_PLL_SD4);
@@ -1018,12 +1018,12 @@ static void rtk_sdmmc_set_speed(struct rtk_sdmmc_host *rtk_host, u8 level)
 
 static void rtk_sdmmc_speed(struct rtk_sdmmc_host *rtk_host, enum sdmmc_clock_speed sd_speed)
 {
-#ifdef CONFIG_ARCH_RTD16xx
+#if defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	unsigned int tmp=0;
 #endif
 
 	void __iomem *sdmmc_base = rtk_host->sdmmc;
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	void __iomem *isopad_base = rtk_host->isopad;
 #elif defined(CONFIG_ARCH_RTD129x)
 	void __iomem *emmc_base = rtk_host->emmc;
@@ -1079,7 +1079,7 @@ static void rtk_sdmmc_speed(struct rtk_sdmmc_host *rtk_host, enum sdmmc_clock_sp
 			writel(0x00324388,  pll_base + CR_PLL_SD3);
 			mdelay(2);
 			writel(0x00000007, pll_base + 0x01EC); //JIM modified, 1AC->1EC
-
+			udelay(200);
 #ifdef CONFIG_ARCH_RTD129x
 			if (readl(sysbrdg_base+0x204)!=0x0)
 				writel(0x00000000,sdmmc_base+0x2c);
@@ -1099,7 +1099,7 @@ static void rtk_sdmmc_speed(struct rtk_sdmmc_host *rtk_host, enum sdmmc_clock_sp
 	case SDMMC_CLOCK_100000KHZ:
 		rtk_sdmmc_debug("%s: speed SDMMC_CLOCK_100000KHZ\n", __func__);
 
-#if defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 		tmp = (0x3fc3fc3 << 4) | (readl(isopad_base + 0xc) & 0xf);
 		writel(tmp,isopad_base + 0xc);
 
@@ -1220,7 +1220,7 @@ static void rtk_sdmmc_speed(struct rtk_sdmmc_host *rtk_host, enum sdmmc_clock_sp
                         writel(0x00267CCF,isopad_base + 0x38);
                         writel(0x00267CCF,isopad_base + 0x3c);
                 }
-#elif defined(CONFIG_ARCH_RTD16xx)
+#elif defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 		writeb(0xd,sdmmc_base + SD_BUS_TA_STATE);
 		switch(driving_capacity%10) {
 		case 0:
@@ -1292,19 +1292,20 @@ static void rtk_sdmmc_speed(struct rtk_sdmmc_host *rtk_host, enum sdmmc_clock_sp
 		writel(readl(sdmmc_base + CR_SD_CKGEN_CTL) | 0x00070000, sdmmc_base + CR_SD_CKGEN_CTL); //Switch SD source clock to 4MHz by Hsin-yin
 		mdelay(2);
 		writel(0x00000007, pll_base + 0x01EC); //JIM modified, 1AC->1EC
-
+		udelay(200);
 #ifdef CONFIG_ARCH_RTD129x
 		if (readl(sysbrdg_base+0x204)!=0x0)
 			writel(0x00000000,sdmmc_base+0x2c);
 #endif
 
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 //		writel(0x40000000,sdmmc_base+0x2c);
 		mdelay(100);
 		writel(0x00000006, pll_base + 0x01EC); //JIM modified, 1AC->1EC
 		writel(0x00b64388, pll_base + CR_PLL_SD3); //SD clock rate formula: (ssc_div_n +3) *4.5/4, jamestai20141222
 		mdelay(2);
 		writel(0x00000007, pll_base + 0x01EC); //JIM modified, 1AC->1EC
+		udelay(200);
 //		writel(0x00000000,sdmmc_base+0x2c);
 #elif defined(CONFIG_ARCH_RTD129x)
 		if (readl(sysbrdg_base+0x204)!=0x0) {
@@ -1314,6 +1315,7 @@ static void rtk_sdmmc_speed(struct rtk_sdmmc_host *rtk_host, enum sdmmc_clock_sp
 			writel(0x00b64388, pll_base + CR_PLL_SD3); //SD clock rate formula: (ssc_div_n +3) *4.5/4, jamestai20141222
 			mdelay(2);
 			writel(0x00000007, pll_base + 0x01EC); //JIM modified, 1AC->1EC
+			udelay(200);
 			writel(0x00000000,sdmmc_base+0x2c);
 		} else {
 			/*Workaround: PLL clcok 208 MHz  */
@@ -1326,6 +1328,7 @@ static void rtk_sdmmc_speed(struct rtk_sdmmc_host *rtk_host, enum sdmmc_clock_sp
 			writel(0x00b64388, pll_base + CR_PLL_SD3); //SD clock rate formula: (ssc_div_n +3) *4.5/4, jamestai20141222
 			mdelay(2);
 			writel(0x00000007, pll_base + 0x01EC); //JIM modified, 1AC->1EC
+			udelay(200);
 		}
 #endif
 
@@ -1337,7 +1340,7 @@ static void rtk_sdmmc_speed(struct rtk_sdmmc_host *rtk_host, enum sdmmc_clock_sp
 		writel(readl(sdmmc_base + CR_SD_CKGEN_CTL) & 0xFFF8FFFF, sdmmc_base + CR_SD_CKGEN_CTL); //Switch SD source clock to normal clock source by Hsin-yin
 		mdelay(2);
 		writel(0x00000007, pll_base + 0x01EC); //JIM modified, 1AC->1EC
-
+		udelay(200);
 #ifdef CONFIG_ARCH_RTD129x
 		if (readl(sysbrdg_base+0x204)!=0x0)
 			writel(0x00000000,sdmmc_base+0x2c);
@@ -2515,7 +2518,7 @@ static void rtk_sdmmc_request(struct mmc_host *host, struct mmc_request *mrq)
 	cmd = mrq->cmd;
 	rtk_host->mrq = mrq;
 	data_xfer_mode = CMD_RSP_ONLY; // init each request
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	if(cmd->opcode==2) {
 		writel(readl(rtk_host->sdmmc + 0x20) & (~0x02), rtk_host->sdmmc  + 0x20);  //Enable L4 gate
 	}
@@ -2558,7 +2561,7 @@ done:
 		up(&cr_sd_sem);	//unplug will release semaphore, in this case we do not need to release the semaphore
 }
 
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 int rtk_sdmmc_clk_cls_chk(struct mmc_host *host)
 {
 	struct rtk_sdmmc_host *rtk_host = mmc_priv(host);
@@ -2605,7 +2608,7 @@ void rtk_sdmmc_open_clk(struct mmc_host *host)
 }
 #endif
 
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 static int rtk_sdmmc_get_cd(struct mmc_host *host)
 {
 	struct rtk_sdmmc_host *rtk_host = mmc_priv(host);
@@ -2710,11 +2713,11 @@ static void rtk_sdmmc_set_ios(struct mmc_host *host, struct mmc_ios *ios)
 {
 	struct rtk_sdmmc_host *rtk_host = mmc_priv(host);
 
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	u32 reginfo;
 	reginfo = readl(rtk_host->gpiodir+GPDATI1);
 #endif
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	//in 1395 platform, system will turn off the SD clock. This case is to handle that the SD card si unplugged during suspend
 	if(reginfo & 0x8) {
 		reset_control_deassert(rstc_cr);
@@ -2785,7 +2788,7 @@ static void rtk_sdmmc_set_ios(struct mmc_host *host, struct mmc_ios *ios)
 		rtk_host->ops->card_power(rtk_host, 0); //power off
 		rtk_sdmmc_debug("%s: Power off\n", __func__);
 	}
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	//in 1395 platform, system will turn off the SD clock. This case is to handle that the SD card si unplugged during suspend
 	if(reginfo & 0x8) {
 		clk_disable_unprepare(clk_cr);
@@ -2798,7 +2801,7 @@ static void rtk_sdmmc_hw_initial(struct rtk_sdmmc_host *rtk_host)
 {
 	void __iomem *sdmmc_base = rtk_host->sdmmc;
 	void __iomem *pll_base = rtk_host->pll;
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	void __iomem *isopad_base = rtk_host->isopad;
 #elif defined(CONFIG_ARCH_RTD129x)
 	void __iomem *emmc_base = rtk_host->emmc;
@@ -2809,7 +2812,7 @@ static void rtk_sdmmc_hw_initial(struct rtk_sdmmc_host *rtk_host)
 	unsigned long flags2;
 #endif
 
-#ifdef CONFIG_ARCH_RTD16xx
+#if defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	unsigned int tmp=0;
 #endif
 	/*SD PLL Initialization, jamestai20150721*/
@@ -2834,7 +2837,7 @@ static void rtk_sdmmc_hw_initial(struct rtk_sdmmc_host *rtk_host)
 	writel(readl(sdmmc_base + CR_SD_CKGEN_CTL) | 0x00070000, sdmmc_base + CR_SD_CKGEN_CTL); //Switch SD source clock to 4MHz by Hsin-yin
 	mdelay(2);
 	writel(0x00000007, pll_base + 0x01EC);	//JIM modified, 1AC->1EC
-
+	udelay(200);
 #ifdef CONFIG_ARCH_RTD129x
 	if (readl(sysbrdg_base+0x204)!=0x0)
 		writel(0x00000000,sdmmc_base+0x2c);
@@ -2851,7 +2854,7 @@ static void rtk_sdmmc_hw_initial(struct rtk_sdmmc_host *rtk_host)
 	//ritel(0x00324388,  pll_base + CR_PLL_SD3);
 	mdelay(2);
 	writel(0x00000007, pll_base + 0x01EC);	  //JIM modified, 1AC->1EC
-
+	udelay(200);
 #ifdef CONFIG_ARCH_RTD129x
 	if (readl(sysbrdg_base+0x204)!=0x0)
 		writel(0x00000000,sdmmc_base+0x2c);
@@ -2873,7 +2876,7 @@ static void rtk_sdmmc_hw_initial(struct rtk_sdmmc_host *rtk_host)
 	writel(readl(sdmmc_base + CR_SD_CKGEN_CTL) & 0xFFF8FFFF, sdmmc_base + CR_SD_CKGEN_CTL); //Switch SD source clock to normal clock source by Hsin-yin
 	udelay(100);
 	writel(0x00000007, pll_base + 0x01EC);		//JIM modified, 1AC->1EC
-
+	udelay(200);
 #ifdef CONFIG_ARCH_RTD129x
 	if (readl(sysbrdg_base+0x204)!=0x0)
 		writel(0x00000000,sdmmc_base+0x2c);
@@ -2885,12 +2888,12 @@ static void rtk_sdmmc_hw_initial(struct rtk_sdmmc_host *rtk_host)
 
 	rtk_sdmmc_speed(rtk_host, SDMMC_CLOCK_400KHZ);
 
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	gpio_set_debounce(rtk_host->sdmmc_wp_gpio, 1000);
 	gpio_set_debounce(rtk_host->sdmmc_cd_gpio, 1000);
 #endif
 
-#if defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	tmp = (0x3fc3fc3 << 4) | (readl(isopad_base + 0xc) & 0xf);
 	writel(tmp,isopad_base + 0xc);
 
@@ -2967,7 +2970,7 @@ static int rtk_sdmmc_switch_voltage(struct mmc_host *mmc, struct mmc_ios *ios)
 	void __iomem *sdmmc_base = rtk_host->sdmmc;
 	void __iomem *pll_base = rtk_host->pll;
 	int ret = 0;
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	u32 temp=0;
 	u32 orig=0;
 #endif
@@ -2985,7 +2988,7 @@ static int rtk_sdmmc_switch_voltage(struct mmc_host *mmc, struct mmc_ios *ios)
 		writel(0x00000000, sdmmc_base + CR_SD_PAD_CTL);
 
 		rtk_sdmmc_sync(rtk_host);
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 		orig = readl(pll_base + CR_PLL_SD1);
 
 		temp = ((orig & 0xffffbfff) | 0x2000);
@@ -3055,12 +3058,13 @@ static int rtk_sdmmc_execute_tuning(struct mmc_host *mmc, u32 opcode)
 			}
 			writel(readl(sdmmc_base + CR_SD_CKGEN_CTL) | 0x00070000, sdmmc_base + CR_SD_CKGEN_CTL); //Switch SD source clock to 4MHz by Hsin-yin
 			reg_tmp = ((reg_tmp & (~0x3FF0000)) | ((reg_tuned3318 - 8) << 16)); //down 8MHz
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 //			writel(0x40000000,sdmmc_base+0x2c);
 			writel(0x00000006, pll_base + 0x01EC);     //JIM modified, 1AC->1EC
 			writel(reg_tmp, pll_base + CR_PLL_SD3);
 			mdelay(2);
 			writel(0x00000007, pll_base + 0x01EC);          //JIM modified, 1AC->1EC
+			udelay(200);
 //			writel(0x00000000,sdmmc_base+0x2c);
 #elif defined(CONFIG_ARCH_RTD129x)
 			if (readl(sysbrdg_base+0x204)!=0x0)
@@ -3069,6 +3073,7 @@ static int rtk_sdmmc_execute_tuning(struct mmc_host *mmc, u32 opcode)
 			writel(reg_tmp, pll_base + CR_PLL_SD3);
 			mdelay(2);
 			writel(0x00000007, pll_base + 0x01EC);		//JIM modified, 1AC->1EC
+			udelay(200);
 			if (readl(sysbrdg_base+0x204)!=0x0)
 				writel(0x00000000,sdmmc_base+0x2c);
 #elif defined(CONFIG_ARCH_RTD119X)
@@ -3137,7 +3142,7 @@ static void rtk_sdmmc_cmd12_fun(unsigned long data)
 }
 #endif
 
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)	//1395 card detection using interrupt mode
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)//1395 card detection using interrupt mode
 static irqreturn_t rtk_sdmmc_cd_irq(int irq, void *data)
 {
 	struct rtk_sdmmc_host *rtk_host = (struct rtk_sdmmc_host *)data;
@@ -3145,7 +3150,7 @@ static irqreturn_t rtk_sdmmc_cd_irq(int irq, void *data)
 	void __iomem *isopad_base = rtk_host->isopad;
 	u32 det_time = 0;
 	int card_exist;
-#ifdef CONFIG_ARCH_RTD16xx
+#if defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	unsigned int tmp=0;
 #endif
 	card_exist = readl(rtk_host->gpiodir+GPDATI1);
@@ -3165,7 +3170,7 @@ static irqreturn_t rtk_sdmmc_cd_irq(int irq, void *data)
 		writel(0x198CD99B,isopad_base + 0x34);
 		writel(0x000CF99F,isopad_base + 0x38);
 		writel(0x000CF99F,isopad_base + 0x3c);
-#elif defined(CONFIG_ARCH_RTD16xx)
+#elif defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 		tmp = (0x3fc3fc3 << 4) | (readl(isopad_base + 0xc) & 0xf);
 		writel(tmp,isopad_base + 0xc);
 
@@ -3417,11 +3422,11 @@ static void rtk_sdmmc_card_power(struct rtk_sdmmc_host *rtk_host, u8 status)
 {
 	int res = 0;
 	u32 power_status = rtk_host->power_status;
-#if defined(CONFIG_ARCH_RTD119X) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD119X) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	u32 tmp;
 #endif
 	//void __iomem *pll_base = rtk_host->pll;
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	void __iomem *isopad_base = rtk_host->isopad;
 #elif defined(CONFIG_ARCH_RTD129x)
 	void __iomem *emmc_base = rtk_host->emmc;	//Jim modified
@@ -3436,7 +3441,7 @@ static void rtk_sdmmc_card_power(struct rtk_sdmmc_host *rtk_host, u8 status)
 
 	if (status) {
 		res = gpio_direction_output(rtk_host->sdmmc_gpio, 0);
-#if defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 		tmp = (0x3fc3fc3 << 4) | (readl(isopad_base + 0xc) & 0xf);
 		writel(tmp,isopad_base + 0xc);
 
@@ -3466,7 +3471,7 @@ static void rtk_sdmmc_card_power(struct rtk_sdmmc_host *rtk_host, u8 status)
 		}
 	} else {
 		res = gpio_direction_input(rtk_host->sdmmc_gpio);
-#if defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 		writel(readl(isopad_base + 0xc) & 0xdffdffdf, isopad_base + 0xc);
 		writel(readl(isopad_base + 0x10) & 0xffdffdff, isopad_base + 0x10);
 		writel(readl(isopad_base + 0x14) & 0xfffffffd, isopad_base + 0x14);
@@ -3644,7 +3649,7 @@ static int rtk_sdmmc_probe(struct platform_device *pdev)
 	rtk_host->pll = of_iomap(sdmmc_node, 0);
 	rtk_host->sdmmc = of_iomap(sdmmc_node, 1);
 	rtk_host->sysbrdg = of_iomap(sdmmc_node, 2);
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	rtk_host->isopad = of_iomap(sdmmc_node, 3);
 #else
 	rtk_host->emmc = of_iomap(sdmmc_node, 3);
@@ -3652,7 +3657,7 @@ static int rtk_sdmmc_probe(struct platform_device *pdev)
 #ifdef CONFIG_ARCH_RTD119X
 	rtk_host->sdio = of_iomap(sdmmc_node, 4);
 #endif
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
         rtk_host->gpiodir = of_iomap(sdmmc_node, 5);
 #endif
 	rtk_host->int_waiting = &rtk_sdmmc_wait;
@@ -3669,7 +3674,7 @@ static int rtk_sdmmc_probe(struct platform_device *pdev)
 	magic_num = readl(rtk_host->sysbrdg + 0x204) >> 16;
 #endif
 
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	rtk_host->sdmmc_wp_gpio = of_get_gpio_flags(sdmmc_node, 1, NULL);
 	if (gpio_is_valid(rtk_host->sdmmc_wp_gpio)) {
                 ret = gpio_request(rtk_host->sdmmc_wp_gpio, "sd_card_wp_gpio");
@@ -3738,7 +3743,7 @@ static int rtk_sdmmc_probe(struct platform_device *pdev)
 	} else {
 		rtk_host->irq = irq;
 	}
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	rtk_host->cd_irq = gpio_to_irq(rtk_host->sdmmc_cd_gpio);
 	if(!rtk_host->cd_irq) printk(KERN_ERR "Cannot get the SD CD irq...\n");
 	else printk(KERN_INFO "SD CD irq=%d\n",rtk_host->cd_irq);
@@ -3840,7 +3845,7 @@ static struct platform_driver rtk_sdmmc_driver = {
 #endif
 		.of_match_table = rtk_sdmmc_match,
 	},
-#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#if defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	.shutdown = rtk_sdmmc_shutdown,
 #endif
 };

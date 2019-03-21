@@ -54,6 +54,7 @@ static struct scsi_host_template ahci_platform_sht = {
 struct ahci_port_desc {
 	unsigned int index;
 	unsigned int power_io;
+	unsigned int power_save;
 	struct reset_control *rsts[MAC_MAX_RST];
 };
 
@@ -68,7 +69,6 @@ struct ahci_rtk_dev {
 	enum rtd_chip_id chip_id;
 	enum rtd_chip_revision chip_revision;
 	unsigned int state;
-	unsigned int power_save;
 };
 
 void rtk_sata_phy_poweron(struct ata_link *link)
@@ -100,6 +100,7 @@ static void rtk_sata_init(struct ahci_host_priv *hpriv)
 
 	if (ahci_dev->chip_id == CHIP_ID_RTD1619) {
 		writel(0x40, mmio + 0xf18);
+		writel(0xc0c300, mmio + 0xf20);
 		// COMINIT waveform adjustment
 		writel(0x0506373e, mmio + 0xf2c);
 		// COMINIT detect enable
@@ -222,13 +223,13 @@ static void rtk_sata_power_ctrl(struct ahci_rtk_dev *ahci_dev)
 		if (hpriv->phys[i] == NULL)
 			continue;
 
-		if (ahci_dev->power_save == 1 &&
+		if (ahci_dev->ports[i]->power_save == 1 &&
 			(ahci_dev->chip_id & 0xFFF0) == CHIP_ID_RTD129X) {
 			phy_set_mode(hpriv->phys[i], 0);
-			ahci_dev->power_save = 0;
+			ahci_dev->ports[i]->power_save = 0;
 			msleep(20);
 		}
-		if (ahci_dev->power_save == 1 &&
+		if (ahci_dev->ports[i]->power_save == 1 &&
 			ahci_dev->chip_id == CHIP_ID_RTD1619) {
 			val = readl(mmio + 0xf04);
 			if (!(val & (0x1000 << i*16)))
@@ -239,7 +240,7 @@ static void rtk_sata_power_ctrl(struct ahci_rtk_dev *ahci_dev)
 			writel((readl(mmio + 0xf08) & ~(0xffff << i*16)) | (0x0600 << i*16), mmio + 0xf08);
 
 			phy_set_mode(hpriv->phys[i], 0);
-			ahci_dev->power_save = 0;
+			ahci_dev->ports[i]->power_save = 0;
 
 			writel(readl(mmio + 0xf0c) & ~(0x3 << (i*4)), mmio + 0xf0c);
 			writel((readl(mmio + 0xf04) & ~(0xffff << i*16)) | (0x4200 << i*16), mmio + 0xf04);
@@ -249,7 +250,7 @@ static void rtk_sata_power_ctrl(struct ahci_rtk_dev *ahci_dev)
 			msleep(20);
 			continue;
 		}
-		if (!ap->hotplug_flag && !ap->link.sata_spd && ahci_dev->power_save == 0) {
+		if (!ap->hotplug_flag && !ap->link.sata_spd && ahci_dev->ports[i]->power_save == 0) {
 			if (ap->pflags & ATA_PFLAG_EH_IN_PROGRESS)
 				continue;
 
@@ -259,7 +260,7 @@ static void rtk_sata_power_ctrl(struct ahci_rtk_dev *ahci_dev)
 				writel(readl(mmio + 0xf18) & ~(0x7 << 3*i), mmio + 0xf18);
 
 			phy_set_mode(hpriv->phys[i], 1);
-			ahci_dev->power_save = 1;
+			ahci_dev->ports[i]->power_save = 1;
 
 			if (ahci_dev->chip_id == CHIP_ID_RTD1619) {
 				writel(readl(mmio + 0xf0c) | (0x3 << (i*4)), mmio + 0xf0c);
@@ -402,8 +403,10 @@ static int ahci_rtk_probe(struct platform_device *pdev)
 	}
 
 	ahci_platform_enable_clks(hpriv);
-	for (i = 0; i < hpriv->nports; i++)
+	for (i = 0; i < hpriv->nports; i++) {
 		phy_init(hpriv->phys[i]);
+		ahci_dev->ports[i]->power_save = 0;
+	}
 
 	hpriv->plat_data = ahci_dev;
 	ahci_dev->hpriv = hpriv;
@@ -412,7 +415,6 @@ static int ahci_rtk_probe(struct platform_device *pdev)
 
 	rtk_sata_init(hpriv);
 	ahci_dev->state = RUNNING;
-	ahci_dev->power_save = 0;
 
 	INIT_DELAYED_WORK(&ahci_dev->work, rtk_sata_host_ctrl);
 	schedule_delayed_work(&ahci_dev->work, 800);
@@ -515,7 +517,7 @@ static int ahci_rtk_resume(struct device *dev)
 	dev_info(dev, "enter %s\n", __func__);
 
 	power_io = of_get_gpio(dev->of_node, 0);
-	if (power_io)
+	if (power_io >= 0)
 		schedule_work(&ahci_dev->gpio);
 
 	for_each_available_child_of_node(dev->of_node, child) {
@@ -549,8 +551,10 @@ static int ahci_rtk_resume(struct device *dev)
 			}
 		}
 		ahci_platform_enable_clks(hpriv);
-		for (i = 0; i < hpriv->nports; i++)
+		for (i = 0; i < hpriv->nports; i++) {
 			phy_init(hpriv->phys[i]);
+			ahci_dev->ports[i]->power_save = 0;
+		}
 
 		ahci_dev->state = RESUME;
 		rtk_sata_init(hpriv);
@@ -564,7 +568,6 @@ static int ahci_rtk_resume(struct device *dev)
 	pm_runtime_set_active(dev);
 	pm_runtime_enable(dev);
 
-	ahci_dev->power_save = 0;
 	schedule_delayed_work(&ahci_dev->work, 200);
 
 	dev_info(dev, "exit %s\n", __func__);

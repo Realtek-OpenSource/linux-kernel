@@ -117,6 +117,11 @@
 		compatible = "realtek,sb2-sem", "realtek,sb2-sem-dev";
 	};
 
+	sb2_lock3: sb2-lock@9801A63C {
+		reg = <0x9801A63C 0x4>;
+		compatible = "realtek,sb2-sem", "realtek,sb2-sem-avlog";
+	};
+
 	/* fixed clock */
 	osc27M: osc27M {
 		compatible = "fixed-clock";
@@ -740,9 +745,12 @@
 
 	watchdog@0x98007680 {
 		compatible = "realtek,rtk-watchdog";
-		reg = <0x98007680 0x100>;
-		rst-oe = <0>; /* 0:input, 1:output */
-		rst-oe-for-init = <1>; /* 0:input, 1:output */
+                reg = <0x9801b5b0 0x100>, /*misc watchdog for SCPU NMI */
+                        <0x9801b000 0x10>, 
+                        <0x98007680 0x100>; /*iso watchdog for oe workaround */
+                interrupts = <0 0 4>;
+                rst-oe = <0>; /* 0:input, 1:output */
+                rst-oe-for-init = <1>; /* 0:input, 1:output */
 		timeout-sec = <20>;
 		status = "okay";
 	};
@@ -879,6 +887,8 @@
 		vdd_mux1 = <0>; /* 0 ~ 15: VDD_IN source selection */
 		vdd_mux2 = <0>; /* 0 ~ 15: VDD_IN source selection */
 		vdd_mux_en = <1>; /* 0:disable; 1:enable */
+		clocks = <&clk_en_1 CLK_EN_LSADC>;
+		resets = <&rst1 RSTN_LSADC>;
 
 		rtk-lsadc0-pad0 {
 			//compatible = "Realtek,rtk-lsadc0-pad0";
@@ -1006,18 +1016,6 @@
 		};
 	};
 
-	uctrl {
-		compatible = "realtek,userspace-control";
-		clocks = <&clk_en_1 CLK_EN_TP>,
-			<&clk_en_1 CLK_EN_MD>,
-			<&clk_en_1 CLK_EN_SE>;
-		clock-names = "tp", "md", "se";
-		resets = <&rst1 RSTN_TP>,
-			<&rst1 RSTN_MD>,
-			<&rst1 RSTN_SE>;
-		reset-names = "tp", "md", "se";
-	};
-
 	dvfs: cpu-dvfs {
 		compatible = "realtek,rtd139x-dvfs";
 		status = "disabled";
@@ -1098,74 +1096,11 @@
 		status = "disabled";
 	};
 
-	dcsys-pc@98008000 {
-		compatible = "realtek,dcsys-pc", "simple-bus";
-		reg = <0x98008000 0x1000>;
-		clocks = <&cc CC_PLL_BUS_H>;
-		clock-names = "ref";
-		status = "okay";
-
-		dcsys_event: event {
-			compatible = "realtek,dcsys-event", "devfreq-event";
-			status = "okay";
-		};
-
-		uio {
-			compatible = "realtek,dcsys-pc-uio";
-			status = "okay";
-		};
-	};
-
-	bush_dfs: dcsb {
-		compatible = "realtek,busfreq";
-		clocks = <&cc CC_PLL_BUS_H>;
-		devfreq-events = <&dcsys_event>;
-		operating-points-v2 = <&bush_opps>;
-		status = "disabled";
-
-		bush_opps: opp-table {
-			compatible = "operating-points-v2";
-			opp-low {
-				opp-hz = /bits/ 64 <250000000>;
-				clock-latency-ns = <150000>;
-			};
-			opp-high {
-				opp-hz = /bits/ 64 <500000000>;
-				clock-latency-ns = <150000>;
-			};
-		};
-	};
-
-	bus {
-		compatible = "realtek,busfreq";
-		clocks = <&cc CC_PLL_BUS>;
-		operating-points-v2 = <&bus_opps>;
-		devfreq = <&bush_dfs>;
-		status = "disabled";
-
-		bus_opps: opp-table {
-			compatible = "operating-points-v2";
-			opp-low {
-				opp-hz = /bits/ 64 <128250000>;
-				clock-latency-ns = <150000>;
-			};
-			opp-high {
-				opp-hz = /bits/ 64 <256500000>;
-				clock-latency-ns = <150000>;
-			};
-		};
-	};
-
 	audio_in: audio-in {
 		compatible = "realtek,audio-in", "adc";
 		pinctrl-names = "default";
 		pinctrl-0 = <&i2s_out_4pins>, <&i2s_in_pins>;
 		status = "disabled";
-	};
-
-	sw-rtc {
-		compatible = "realtek,sw-rtc";
-		status = "okay";
 	};
 };
 

@@ -1,1 +1,0 @@
-cmd_drivers/tee/optee/optee.o := ccache arm-linux-gnueabi-ld -EL    -r -o drivers/tee/optee/optee.o drivers/tee/optee/core.o drivers/tee/optee/call.o drivers/tee/optee/rpc.o drivers/tee/optee/supp.o drivers/tee/optee/shm_pool.o 

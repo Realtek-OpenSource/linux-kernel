@@ -879,7 +879,7 @@ config REGULATOR_WM8994
 	  WM8994 CODEC.
 
 config REGULATOR_G22XX_CORE
-	bool
+	tristate
 	depends on I2C
 	help
 	  GMT G2227/G2237 common codes
@@ -923,7 +923,7 @@ config REGULATOR_SY8827E
 	  Silergy SY8827E.
 
 config REGULATOR_APW8889
-	tristate "ANPEC APW8889 Power regulator"
+	tristate "ANPEC APW8889 Power regulators"
 	depends on I2C
 	select RTK_REGMAP_I2C
 	help
@@ -931,7 +931,7 @@ config REGULATOR_APW8889
 	  Anpec APW8889.
 
 config REGULATOR_I2C_SELECTOR
-	bool "I2C selector regualtor"
+	tristate "I2C selector regualtors"
 	select REGULATOR_APW8889
 	select REGULATOR_G2237
 

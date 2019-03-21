@@ -26,6 +26,9 @@ enum rtl_cmd {
         RTL_READ_MAC_OCP,
         RTL_WRITE_MAC_OCP,
 
+        RTL_DIRECT_READ_PHY_OCP,
+        RTL_DIRECT_WRITE_PHY_OCP,
+
         RTLTOOL_INVALID
 };
 
@@ -43,7 +46,7 @@ enum mode_access {
 };
 
 #ifdef __KERNEL__
-int rtltool_ioctl(struct rtl8125_private *tp, struct ifreq *ifr);
+int rtl8125_tool_ioctl(struct rtl8125_private *tp, struct ifreq *ifr);
 #endif
 
 #endif /* _LINUX_RTLTOOL_H */

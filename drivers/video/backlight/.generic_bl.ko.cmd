@@ -1,1 +1,0 @@
-cmd_drivers/video/backlight/generic_bl.ko := ccache arm-linux-gnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -o drivers/video/backlight/generic_bl.ko drivers/video/backlight/generic_bl.o drivers/video/backlight/generic_bl.mod.o ;  true

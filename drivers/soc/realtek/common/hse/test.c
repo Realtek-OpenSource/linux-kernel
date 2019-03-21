@@ -3,11 +3,12 @@
 #include <linux/pm_runtime.h>
 #include <linux/io.h>
 #include <linux/slab.h>
+#include <soc/realtek/rtk_chip.h>
 #include "hse.h"
+#include "semem.h"
 
 #define MEM_SIZE              (4*PAGE_SIZE)
 #define MEM_NUM               (6)
-static void *dcsys_base;
 
 struct hse_test_buf {
 	int type;
@@ -15,6 +16,16 @@ struct hse_test_buf {
 	void *virt;
 	int size;
 };
+
+static void hse_memset(struct hse_test_buf *buf, int val, size_t size)
+{
+	if (buf->type == 0) {
+		memset(buf->virt, val, size);
+	} else {
+		// TODO
+		WARN_ON_ONCE(1);
+	}
+}
 
 static void hse_test_buf_free(struct device *dev,
 			      struct hse_test_buf *bufs,
@@ -26,7 +37,7 @@ static void hse_test_buf_free(struct device *dev,
 		if (!bufs[i].virt)
 			continue;
 		if (bufs[i].type) {
-			iounmap(bufs[i].virt);
+			semem_free(bufs[i].virt);
 		} else {
 			dma_free_coherent(dev, bufs[i].size, bufs[i].virt,
 				bufs[i].phys);
@@ -42,19 +53,6 @@ static __must_check struct hse_test_buf *hse_test_buf_alloc(struct device *dev,
 {
 	struct hse_test_buf *bufs;
 	int i;
-	dma_addr_t phys_base = 0;
-
-	if (secure_en) {
-		u32 val;
-
-		if (!dcsys_base) {
-			dev_err(dev, "dcsys is not available\n");
-			return NULL;
-		}
-
-		val = readl(dcsys_base + 0x408);
-		phys_base = val << 2;
-	}
 
 	bufs = kcalloc(mem_num, sizeof(*bufs), GFP_KERNEL);
 	if (!bufs)
@@ -65,10 +63,7 @@ static __must_check struct hse_test_buf *hse_test_buf_alloc(struct device *dev,
 		if (secure_en) {
 			bufs[i].type = 1;
 			bufs[i].size = size;
-			bufs[i].virt = ioremap(phys_base, size);
-			bufs[i].phys = phys_base;
-
-			phys_base += size;
+			bufs[i].virt = semem_alloc(size, &bufs[i].phys);
 		} else {
 			bufs[i].type = 0;
 			bufs[i].size = size;
@@ -568,6 +563,7 @@ do { \
 } while (0);
 
 
+__maybe_unused
 static void hse_test_engine_rotate(struct hse_test_obj *hobj)
 {
 	struct hse_engine *eng = hobj->eng;
@@ -609,7 +605,7 @@ static void hse_test_engine_rotate(struct hse_test_obj *hobj)
 		u32 sp = cases[i].sp;
 		u32 dp = cases[i].dp;
 
-		memset(bufs[1].virt, 0x00, MEM_SIZE);
+		hse_memset(&bufs[1], 0x00, MEM_SIZE);
 		hse_flush_dcache_area(bufs[1].virt, MEM_SIZE);
 
 		TEST_BEGIN(hobj, "hse_rotate (m=%u, w=%u h=%u sp=%u dp=%u)\n", m, w, h, sp, dp);
@@ -633,6 +629,7 @@ struct hse_yuy2_to_nv12_args {
 	u32 dp;
 };
 
+__maybe_unused
 static void hse_test_engine_yuy2(struct hse_test_obj *hobj)
 {
 	struct hse_engine *eng = hobj->eng;
@@ -659,9 +656,9 @@ static void hse_test_engine_yuy2(struct hse_test_obj *hobj)
 		u32 sp = cases[i].sp;
 		u32 dp = cases[i].dp;
 
-		memset(bufs[1].virt, 0x00, MEM_SIZE);
+		hse_memset(&bufs[1], 0x00, MEM_SIZE);
 		hse_flush_dcache_area(bufs[1].virt, MEM_SIZE);
-		memset(bufs[2].virt, 0x00, MEM_SIZE);
+		hse_memset(&bufs[2], 0x00, MEM_SIZE);
 		hse_flush_dcache_area(bufs[2].virt, MEM_SIZE);
 
 		TEST_BEGIN(hobj, "hse_yuy2_to_nv12 (w=%u h=%u sp=%u dp=%u)\n", w, h, sp, dp);
@@ -681,19 +678,19 @@ static void hse_test_engine_xor(struct hse_test_obj *hobj)
 	int i;
 
 	/* prepare data for copy and xor */
-	memset(bufs[1].virt, 0x01, MEM_SIZE);
+	hse_memset(&bufs[1], 0x01, MEM_SIZE);
 	hse_flush_dcache_area(bufs[1].virt, MEM_SIZE);
-	memset(bufs[2].virt, 0x02, MEM_SIZE);
+	hse_memset(&bufs[2], 0x02, MEM_SIZE);
 	hse_flush_dcache_area(bufs[2].virt, MEM_SIZE);
-	memset(bufs[3].virt, 0x06, MEM_SIZE);
+	hse_memset(&bufs[3], 0x06, MEM_SIZE);
 	hse_flush_dcache_area(bufs[3].virt, MEM_SIZE);
-	memset(bufs[4].virt, 0x18, MEM_SIZE);
+	hse_memset(&bufs[4], 0x18, MEM_SIZE);
 	hse_flush_dcache_area(bufs[4].virt, MEM_SIZE);
-	memset(bufs[5].virt, 0x30, MEM_SIZE);
+	hse_memset(&bufs[5], 0x30, MEM_SIZE);
 	hse_flush_dcache_area(bufs[5].virt, MEM_SIZE);
 
 	/* copy */
-	memset(bufs[0].virt, 0x00, MEM_SIZE);
+	hse_memset(&bufs[0], 0x00, MEM_SIZE);
 	hse_flush_dcache_area(bufs[1].virt, MEM_SIZE);
 
 	TEST_BEGIN(hobj, "hse_copy (size=%u)\n", (u32)MEM_SIZE);
@@ -706,7 +703,7 @@ static void hse_test_engine_xor(struct hse_test_obj *hobj)
 	for (i = 2; i <= 5; i++) {
 		u32 xor_num;
 
-		memset(bufs[0].virt, 0x00, MEM_SIZE);
+		hse_memset(&bufs[0], 0x00, MEM_SIZE);
 		hse_flush_dcache_area(bufs[1].virt, MEM_SIZE);
 
 		xor_num = i;
@@ -718,11 +715,11 @@ static void hse_test_engine_xor(struct hse_test_obj *hobj)
 	}
 }
 
-
 static int hse_test_engine(struct hse_engine *eng)
 {
 	int ret = 0;
 	struct hse_test_obj *hobj;
+	bool rotate_workaround = get_rtd_chip_revision() == RTD_CHIP_A00;
 
 	pr_err("test engine@%03x\n", eng->base_offset);
 
@@ -731,12 +728,23 @@ static int hse_test_engine(struct hse_engine *eng)
 		return -ENOMEM;
 
 	hse_test_engine_xor(hobj);
-#ifdef CONFIG_ARCH_RTD16xx
+
+#ifdef CONFIG_RTK_HSE_HAS_YUY2
 	hse_test_engine_yuy2(hobj);
-	reset_control_reset(eng->hdev->rstc);
-	hse_test_engine_rotate(hobj);
-	reset_control_reset(eng->hdev->rstc);
 #endif
+
+#ifdef CONFIG_RTK_HSE_HAS_ROTATE
+
+	if (rotate_workaround) {
+		pr_err("rotate_workaround=%d\n", rotate_workaround);
+		reset_control_reset(eng->hdev->rstc);
+	}
+	hse_test_engine_rotate(hobj);
+	if (rotate_workaround)
+		reset_control_reset(eng->hdev->rstc);
+	hse_test_engine_xor(hobj);
+#endif
+
 	pr_err("\n");
 	pr_err("### result ###\n");
 	pr_err("### passed: %d, failed: %d, total: %d ###\n", hobj->pass, hobj->fail, hobj->total);
@@ -746,29 +754,12 @@ static int hse_test_engine(struct hse_engine *eng)
 	return ret;
 }
 
-static void dcsys_init(void)
-{
-	dcsys_base = ioremap(0x98008000, 0x1000);
-	if (!dcsys_base) {
-		pr_err("failed to map dc_sys register\n");
-		return;
-	}
-}
-
-static void dcsys_fini(void)
-{
-	if (!dcsys_base)
-		return;
-	iounmap(dcsys_base);
-}
-
 int hse_self_test(struct hse_device *hdev)
 {
 	struct hse_engine *engs[HSE_MAX_ENGINES] = {0};
 	int i;
 
 	pm_runtime_get_sync(hdev->dev);
-	dcsys_init();
 	for (i = 0; i < HSE_MAX_ENGINES; i++) {
 		engs[i] = hse_engine_get_any(hdev);
 		if (!engs[i])
@@ -783,7 +774,6 @@ int hse_self_test(struct hse_device *hdev)
 	for (i = 0; i < HSE_MAX_ENGINES; i++)
 		if (engs[i])
 			hse_engine_put(engs[i]);
-	dcsys_fini();
         pm_runtime_put_sync(hdev->dev);
 	return 0;
 }

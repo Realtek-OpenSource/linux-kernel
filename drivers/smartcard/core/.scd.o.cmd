@@ -1,1 +1,0 @@
-cmd_drivers/smartcard/core/scd.o := ccache arm-linux-gnueabi-ld -EL    -r -o drivers/smartcard/core/scd.o drivers/smartcard/core/scd_core.o drivers/smartcard/core/scd_buff.o drivers/smartcard/core/scd_dev.o drivers/smartcard/core/scd_atr.o 

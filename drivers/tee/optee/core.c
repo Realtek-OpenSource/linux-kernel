@@ -30,7 +30,9 @@
 #include "optee_smc.h"
 #include <linux/proc_fs.h>
 #include "shm_pool.h"
-#ifdef CONFIG_RTD139x
+
+
+#if defined(CONFIG_RTD139x) || defined(CONFIG_RTD16xx)
 #include <linux/semaphore.h>
 #endif
 #define DRIVER_NAME "optee"
@@ -39,7 +41,7 @@
 
 //#define BL31_TSP_TEST
 
-#ifdef CONFIG_RTD139x
+#if defined(CONFIG_RTD139x) || defined(CONFIG_RTD16xx)
 static struct semaphore sem_tee;
 #endif
 
@@ -534,11 +536,11 @@ static void optee_smccc_smc(unsigned long a0, unsigned long a1,
 			    unsigned long a6, unsigned long a7,
 			    struct arm_smccc_res *res)
 {
-#ifdef CONFIG_RTD139x
+#if defined(CONFIG_RTD139x) || defined(CONFIG_RTD16xx)
 	down(&sem_tee);
 #endif
 	arm_smccc_smc(a0, a1, a2, a3, a4, a5, a6, a7, res);
-#ifdef CONFIG_RTD139x
+#if defined(CONFIG_RTD139x) || defined(CONFIG_RTD16xx)
 	up(&sem_tee);
 #endif
 }
@@ -721,10 +723,11 @@ static int __init optee_driver_init(void)
 	struct device_node *fw_np;
 	struct device_node *np;
 	struct optee *optee;
-#ifdef CONFIG_RTD139x
+#if defined(CONFIG_RTD139x) || defined(CONFIG_RTD16xx)
 	printk(KERN_INFO "TEE SEM INIT\n");
 	sema_init( &sem_tee, 3);
 #endif
+
 	/* Node is supposed to be below /firmware */
 	fw_np = of_find_node_by_name(NULL, "firmware");
 	if (!fw_np)

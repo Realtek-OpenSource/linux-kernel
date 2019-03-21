@@ -29,6 +29,7 @@
 #include <linux/of_gpio.h>
 #include <soc/realtek/rtd129x_lockapi.h>
 #include <linux/reset.h>
+#include <soc/realtek/rtk_chip.h>
 
 #include "sdhci-pltfm.h"
 #include "sdhci-rtk.h"
@@ -382,6 +383,7 @@ void rtk_register_set(void)
 			writel(0x00ae4388, crt_membase + 0x01A8); //SDIO 3.0, 208MHz
 			mdelay(2);
 			writel(0x00000007, crt_membase + 0x01AC);
+			udelay(200);
 #endif
 		}
 		else {
@@ -394,6 +396,7 @@ void rtk_register_set(void)
 			writel(0x00ae4388, crt_membase + 0x01A8); //SDIO 3.0, 208MHz
 			mdelay(2);
 			writel(0x00000007, crt_membase + 0x01AC);
+			udelay(200);
 #ifdef CONFIG_ARCH_RTD129x
 			writel(0x00000000, crt_membase+ 0x10a58);
 #endif
@@ -470,6 +473,7 @@ void rtk_sdhci_platform_init(void)
 	writel(0x00ae4388, crt_membase + 0x01A8); //SDIO 3.0, 208MHz
 	mdelay(2);
 	writel(0x00000007, crt_membase + 0x01AC);
+	udelay(200);
 #endif
     }
     else {
@@ -482,6 +486,7 @@ void rtk_sdhci_platform_init(void)
 	writel(0x00ae4388, crt_membase + 0x01A8); //SDIO 3.0, 208MHz
 	mdelay(2);
 	writel(0x00000007, crt_membase + 0x01AC);
+	udelay(200);
 #ifdef CONFIG_ARCH_RTD129x
 	writel(0x00000000, crt_membase+ 0x10a58);
 #endif
@@ -548,6 +553,13 @@ void rtk_sdhci_close_clk(void)
                 clk_disable_unprepare(clk_en_sdio_ip);
 		wmb();
 		mdelay(10);
+#if defined(CONFIG_ARCH_RTD16xx)
+    	if(get_rtd_chip_revision()==RTD_CHIP_A01) {
+		writel(readl(crt_membase + 0x1A0)&(~0x1), crt_membase + 0x1A0);
+		writel(readl(crt_membase + 0x1A4)&(~0x1), crt_membase + 0x1A4);
+		udelay(200);
+	}
+#endif
 		//writel(readl(crt_membase + 0x0C) & (~(1 << 30)), crt_membase + 0x0C);
 		//writel(readl(crt_membase + 0x0C) & (~(1 << 26)), crt_membase + 0x0C);
 	}
@@ -827,6 +839,7 @@ static int rtk_sdhci_execute_tuning(struct sdhci_host *host, u32 opcode)
             writel(reg_tmp,crt_membase + 0x01A8);
             mdelay(2);
             writel(0x00000007, crt_membase + 0x01AC);        //JIM modified, 1AC->1EC
+	    udelay(200);
 #ifdef CONFIG_ARCH_RTD129x
             if(readl(crt_membase+0x1a204)!=0x0)
 		writel(0x00000000, crt_membase+ 0x10a58);
@@ -929,7 +942,14 @@ static int sdhci_rtk_probe(struct platform_device *pdev)
 		PTR_ERR(clk_en_sdio_ip));
 	    clk_en_sdio_ip = NULL;
     }
-
+#if defined(CONFIG_ARCH_RTD16xx)
+    if(get_rtd_chip_revision()==RTD_CHIP_A01) {
+	writel(readl(crt_membase + 0x1A0)|0x1, crt_membase + 0x1A0);
+	writel(readl(crt_membase + 0x1A4)|0x1, crt_membase + 0x1A4);
+	udelay(200);
+    }
+#endif
+ 
     host = sdhci_pltfm_init(pdev, soc_data->pdata, 0);
     if(IS_ERR(host))
         return PTR_ERR(host);
@@ -1056,6 +1076,7 @@ static int sdhci_rtk_resume(struct device *dev){
 			writel(0x00ae4388, crt_membase + 0x01A8); //SDIO 3.0, 200MHz
 			mdelay(2);
 			writel(0x00000007, crt_membase + 0x01AC);
+			udelay(200);
 #endif
 #ifdef CONFIG_ARCH_RTD129x
 			writel(0x00000000, crt_membase + 0x0018);
@@ -1074,6 +1095,7 @@ static int sdhci_rtk_resume(struct device *dev){
                         writel(0x00ae4388, crt_membase + 0x01A8); //SDIO 3.0, 200MHz
                         mdelay(2);
                         writel(0x00000007, crt_membase + 0x01AC);
+			udelay(200);
 #endif
 #ifdef CONFIG_ARCH_RTD129x
                         writel(0x00000000, crt_membase + 0x0018);
@@ -1127,7 +1149,7 @@ static int sdhci_rtk_resume(struct device *dev){
 			writel(0x00ae4388, crt_membase + 0x01A8); //SDIO 3.0, 200MHz
 			mdelay(2);
 			writel(0x00000007, crt_membase + 0x01AC);
-
+			udelay(200);
 #ifdef CONFIG_ARCH_RTD129x
 			writel(0x00000000, crt_membase+ 0x10a58);
 #endif
@@ -1146,6 +1168,7 @@ static int sdhci_rtk_resume(struct device *dev){
                         writel(0x00ae4388, crt_membase + 0x01A8); //SDIO 3.0, 200MHz
                         mdelay(2);
                         writel(0x00000007, crt_membase + 0x01AC);
+			udelay(200);
 #ifdef CONFIG_ARCH_RTD129x
                         writel(0x00000000, crt_membase+ 0x10a58);
 #endif
@@ -1168,6 +1191,7 @@ static int sdhci_rtk_resume(struct device *dev){
 		writel(0x00ae4388, crt_membase + 0x01A8); //SDIO 2.0, 100MHz
     		mdelay(2);
     		writel(0x00000007, crt_membase + 0x01AC);
+		udelay(200);
 #endif
 #ifdef CONFIG_ARCH_RTD129x
     		writel(0x00000000, crt_membase + 0x0018);
@@ -1194,6 +1218,7 @@ static int sdhci_rtk_resume(struct device *dev){
 		writel(0x00ae4388, crt_membase + 0x01A8); //SDIO 2.0, 100MHz
                 mdelay(2);
                 writel(0x00000007, crt_membase + 0x01AC);
+		udelay(200);
 #ifdef CONFIG_ARCH_RTD129x
 		writel(0x00000000, crt_membase+ 0x10a58);
 #endif

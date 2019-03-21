@@ -6,3 +6,5 @@ rtk-hse-y += device.o
 rtk-hse-y += cq.o
 
 rtk-hse-$(CONFIG_RTK_HSE_SELFTEST) += test.o
+rtk-hse-$(CONFIG_RTK_HSE_SELFTEST) += semem.o
+

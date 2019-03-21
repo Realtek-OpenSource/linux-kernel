@@ -169,7 +169,7 @@ int rpc_poll_open(struct inode *inode, struct file *filp)
 	pr_debug("RPC poll open with minor number: %d\n", minor);
 
 		if (!filp->private_data) {
-			RPC_PROCESS *proc = kmalloc(sizeof(RPC_PROCESS), GFP_KERNEL);
+			RPC_PROCESS *proc = kmalloc(sizeof(RPC_PROCESS), GFP_KERNEL | __GFP_ZERO);
 
 			if (proc == NULL) {
 				pr_err("%s: failed to allocate RPC_PROCESS", __func__);
@@ -186,6 +186,7 @@ int rpc_poll_open(struct inode *inode, struct file *filp)
 			proc->extra = &rpc_poll_extra[minor/RPC_NR_PAIR];
 			/* current->tgid = process id, current->pid = thread id */
 			proc->pid = current->tgid;
+            proc->bStayActive = false;
 
 			init_waitqueue_head(&proc->waitQueue);
 			INIT_LIST_HEAD(&proc->threads);
@@ -544,6 +545,22 @@ long rpc_poll_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		pr_debug("%s:%d %s: Add handler pid:%d for programID:%lu\n", __func__, __LINE__, proc->extra->name, proc->pid, arg);
 		break;
 #endif
+    case RPC_IOC_PROCESS_CONFIG_0:
+        {
+            struct S_RPC_IOC_PROCESS_CONFIG_0 config;
+
+            if (copy_from_user(&config, (void __user *)arg, sizeof(struct S_RPC_IOC_PROCESS_CONFIG_0))) {
+                pr_err("ERROR! %s cmd:RPC_IOC_PROCESS_CONFIG_0 copy_from_user failed\n", __func__);
+                return -ENOMEM;
+            }
+
+            if (proc == NULL) {
+                pr_err("ERROR! %s cmd:RPC_IOC_PROCESS_CONFIG_0 proc:%p\n", __func__, proc);
+                return -ENOMEM;
+            }
+            proc->bStayActive = (config.bStayActive > 0) ? true : false;
+            break;
+        }
 	default:
 		pr_warn("%s:%d unsupported ioctl cmd:%x arg:%lx\n", __func__, __LINE__, cmd, arg);
 		return -ENOTTY;
@@ -575,7 +592,7 @@ long rpc_ctrl_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		writel(RPC_INT_AS, rpc_int_base+RPC_SB2_INT);
 		writel(RPC_INT_SA, rpc_int_base+RPC_SB2_INT);
 
-		rpc_set_flag(0xffffffff);
+		rpc_set_flag(RPC_AUDIO, 0xffffffff);
 
 		pr_info("[RPC]done...\n");
 		break;

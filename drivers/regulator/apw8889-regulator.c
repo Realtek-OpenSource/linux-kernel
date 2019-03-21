@@ -35,6 +35,8 @@ struct apw8889_regulator_desc {
 	u8 smode_mask;
 	u8 svsel_reg;
 	u8 svsel_mask;
+	u8 clamp_reg;
+	u8 clamp_mask;
 };
 
 struct apw8889_regulator_data {
@@ -45,6 +47,7 @@ struct apw8889_regulator_data {
 	struct regmap_field *svsel;
 	struct regmap_field *smode;
 	struct regmap_field *nmode;
+	struct regmap_field *clamp;
 
 	struct regulator_state state_mem;
 	struct regulator_state state_coldboot;
@@ -211,10 +214,47 @@ static int apw8889_regulator_get_voltage_fixed(struct regulator_dev *rdev)
 	return -EINVAL;
 }
 
+static int apw8889_regulator_set_clamp_en(struct regulator_dev *rdev,
+					  int enable)
+{
+	struct apw8889_regulator_data *data = rdev_get_drvdata(rdev);
+
+	if (!data->clamp)
+		return -EINVAL;
+	dev_dbg(rdev_get_dev(rdev), "%s: set clamp_en val=%x\n",
+		__func__, enable);
+	return regmap_field_write(data->clamp, enable);
+}
+
+static int apw8889_regulator_get_clamp_en(struct regulator_dev *rdev)
+{
+	struct apw8889_regulator_data *data = rdev_get_drvdata(rdev);
+	unsigned int enable;
+	int ret;
+
+	if (!data->clamp)
+		return -EINVAL;
+	ret = regmap_field_read(data->clamp, &enable);
+	if (!ret)
+		dev_dbg(rdev_get_dev(rdev), "%s: get clamp_en val=%x\n",
+			__func__, enable);
+	return ret ? ret : enable;
+}
+
+static int apw8889_regulator_set_voltage_sel_regmap(struct regulator_dev *rdev,
+						    unsigned sel)
+{
+	struct apw8889_regulator_data *data = rdev_get_drvdata(rdev);
+
+	if (data->clamp)
+		apw8889_regulator_set_clamp_en(rdev, sel < 0x34);
+	return regulator_set_voltage_sel_regmap(rdev, sel);
+}
+
 static const struct regulator_ops apw8889_regulator_ops = {
 	.list_voltage         = regulator_list_voltage_linear,
 	.map_voltage          = regulator_map_voltage_linear,
-	.set_voltage_sel      = regulator_set_voltage_sel_regmap,
+	.set_voltage_sel      = apw8889_regulator_set_voltage_sel_regmap,
 	.get_voltage_sel      = regulator_get_voltage_sel_regmap,
 	.enable               = regulator_enable_regmap,
 	.disable              = regulator_disable_regmap,
@@ -299,6 +339,52 @@ static inline void setup_regulator_state(struct regulator_state *state)
 #define APW8889_DC_MODE_MASK    (REGULATOR_MODE_NORMAL | REGULATOR_MODE_FAST)
 #define APW8889_LDO_MODE_MASK   (REGULATOR_MODE_NORMAL | REGULATOR_MODE_IDLE)
 
+static ssize_t apw8889_regulator_clamp_en_store(struct device *dev,
+						struct device_attribute *attr,
+						const char *buf,
+						size_t count)
+{
+	return -EINVAL;
+}
+
+static ssize_t apw8889_regulator_clamp_en_show(struct device *dev,
+					       struct device_attribute *attr,
+					       char *buf)
+{
+
+	struct regulator_dev *rdev = dev_get_drvdata(dev);
+	int val = apw8889_regulator_get_clamp_en(rdev);
+
+	switch (val) {
+	case 1:
+		return sprintf(buf, "enable\n");
+	case 0:
+		return sprintf(buf, "disable\n");
+	case -EINVAL:
+		return sprintf(buf, "invalid\n");
+	}
+	return sprintf(buf, "unknown\n");
+}
+
+static DEVICE_ATTR(clamp_en, 0644,
+		   apw8889_regulator_clamp_en_show,
+		   apw8889_regulator_clamp_en_store);
+
+static struct attribute *apw8889_regulator_dev_attrs[] = {
+	&dev_attr_clamp_en.attr,
+	NULL
+};
+
+static const struct attribute_group apw8889_regulator_dev_group = {
+	.name = "apw8889",
+	.attrs = apw8889_regulator_dev_attrs,
+};
+
+static int apw8889_regulator_add_sysfs(struct device *dev)
+{
+	return sysfs_create_group(&dev->kobj, &apw8889_regulator_dev_group);
+}
+
 static int apw8889_regulator_register(struct apw8889_device *adev,
 	struct apw8889_regulator_desc *gd)
 {
@@ -323,6 +409,12 @@ static int apw8889_regulator_register(struct apw8889_device *adev,
 	if (IS_ERR(data->svsel))
 		return PTR_ERR(data->svsel);
 
+	if (gd->clamp_reg) {
+		data->clamp = create_regmap_field(adev, gd->clamp_reg, gd->clamp_mask);
+		if (IS_ERR(data->clamp))
+			return PTR_ERR(data->clamp);
+	}
+
 	config.dev         = adev->dev;
 	config.regmap      = adev->regmap;
 	config.driver_data = data;
@@ -330,6 +422,9 @@ static int apw8889_regulator_register(struct apw8889_device *adev,
 	data->rdev = devm_regulator_register(dev, &gd->desc, &config);
 	if (IS_ERR(data->rdev))
 		return PTR_ERR(data->rdev);
+
+	apw8889_regulator_add_sysfs(rdev_get_dev(data->rdev));
+	apw8889_regulator_set_clamp_en(data->rdev, 1);
 
 	c = data->rdev->constraints;
 	/* setup regulator state */
@@ -384,6 +479,36 @@ enum {
 	.svsel_mask = APW8889_ ## _id ## _SLPVOLT_MASK,            \
 }
 
+#define APW8889_DESC_CLAMP(_id, _name, _min_uV, _uV_step, _n_volt, _type) \
+{                                                                  \
+	.desc = {                                                  \
+		.owner       = THIS_MODULE,                        \
+		.type        = REGULATOR_VOLTAGE,                  \
+		.ops         = &apw8889_regulator_ops,             \
+		.name        = _name,                              \
+		.of_match    = _name,                              \
+		.n_voltages  = _n_volt,                            \
+		.min_uV      = _min_uV,                            \
+		.uV_step     = _uV_step,                           \
+		.id          = APW8889_ID_ ## _id,                 \
+		.vsel_reg    = APW8889_REG_ ## _id ## _NRMVOLT,    \
+		.vsel_mask   = APW8889_ ## _id ## _NRMVOLT_MASK,   \
+		.enable_reg  = APW8889_REG_ONOFF,                  \
+		.enable_mask = APW8889_ ## _id ## _ON_MASK,        \
+		.enable_val  = APW8889_ ## _id ## _ON_MASK,        \
+		.of_parse_cb = apw8889_regulator_of_parse_cb,      \
+		.of_map_mode = apw8889_regulator_ ## _type ##_of_map_mode, \
+	},                                                         \
+	.nmode_reg  = APW8889_REG_ ## _id ## _MODE,                \
+	.nmode_mask = APW8889_ ## _id ## _NRMMODE_MASK,            \
+	.smode_reg  = APW8889_REG_ ## _id ## _MODE,                \
+	.smode_mask = APW8889_ ## _id ## _SLPMODE_MASK,            \
+	.svsel_reg  = APW8889_REG_ ## _id ## _SLPVOLT,             \
+	.svsel_mask = APW8889_ ## _id ## _SLPVOLT_MASK,            \
+	.clamp_reg  = APW8889_REG_CLAMP,                           \
+	.clamp_mask = APW8889_ ## _id ## _CLAMP_MASK,              \
+}
+
 #define APW8889_DESC_FIXED_UV(_id, _name, _fixed_uV)               \
 {                                                                  \
 	.desc = {                                                  \
@@ -408,12 +533,12 @@ enum {
 }
 
 static struct apw8889_regulator_desc desc[] = {
-	[APW8889_ID_DC1]  = APW8889_DESC(DC1,  "dc1",  2200000, 25000, 64, dc),
-	[APW8889_ID_DC2]  = APW8889_DESC(DC2,  "dc2",   550000, 12500, 64, dc),
-	[APW8889_ID_DC3]  = APW8889_DESC(DC3,  "dc3",   550000, 12500, 64, dc),
-	[APW8889_ID_DC4]  = APW8889_DESC(DC4,  "dc4",   550000, 12500, 64, dc),
+	[APW8889_ID_DC1]  = APW8889_DESC(DC1, "dc1", 2200000, 25000, 64, dc),
+	[APW8889_ID_DC2]  = APW8889_DESC_CLAMP(DC2, "dc2", 550000, 12500, 64, dc),
+	[APW8889_ID_DC3]  = APW8889_DESC_CLAMP(DC3, "dc3", 550000, 12500, 64, dc),
+	[APW8889_ID_DC4]  = APW8889_DESC_CLAMP(DC4, "dc4", 550000, 12500, 64, dc),
 	[APW8889_ID_DC5]  = APW8889_DESC_FIXED_UV(DC5, "dc5", 0),
-	[APW8889_ID_DC6]  = APW8889_DESC(DC6,  "dc6",   800000, 20000, 64, dc),
+	[APW8889_ID_DC6]  = APW8889_DESC(DC6, "dc6",  800000, 20000, 64, dc),
 	[APW8889_ID_LDO1] = APW8889_DESC(LDO1, "ldo1", 1780000, 40000, 64, ldo),
 };
 
@@ -437,12 +562,14 @@ static const struct reg_default apw8889_reg_defaults[] = {
 	{ .reg = APW8889_REG_DC4_SLPVOLT,  .def = 0x24, },
 	{ .reg = APW8889_REG_DC6_SLPVOLT,  .def = 0x32, },
 	{ .reg = APW8889_REG_LDO1_SLPVOLT, .def = 0x12, },
+	{ .reg = APW8889_REG_CLAMP,        .def = 0x00, },
 };
 
 static bool apw8889_regmap_readable_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case APW8889_REG_ONOFF ... APW8889_REG_LDO1_SLPVOLT:
+	case APW8889_REG_CLAMP:
 	case APW8889_REG_CHIP_ID:
 	case APW8889_REG_VERSION:
 		return true;
@@ -454,6 +581,7 @@ static bool apw8889_regmap_writeable_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case APW8889_REG_ONOFF ... APW8889_REG_LDO1_SLPVOLT:
+	case APW8889_REG_CLAMP:
 		return true;
 	}
 	return false;
@@ -462,6 +590,7 @@ static bool apw8889_regmap_writeable_reg(struct device *dev, unsigned int reg)
 static bool apw8889_regmap_volatile_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
+	case APW8889_REG_CLAMP:
 	case APW8889_REG_CHIP_ID:
 	case APW8889_REG_VERSION:
 		return true;
@@ -580,6 +709,7 @@ struct i2c_driver apw8889_regulator_driver = {
 	.shutdown = apw8889_regulator_shutdown,
 };
 module_i2c_driver(apw8889_regulator_driver);
+EXPORT_SYMBOL_GPL(apw8889_regulator_driver);
 
 MODULE_DESCRIPTION("Anpec APW8889 Regulator Driver");
 MODULE_AUTHOR("Cheng-Yu Lee <cylee12@realtek.com>");

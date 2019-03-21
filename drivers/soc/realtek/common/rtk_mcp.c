@@ -666,9 +666,11 @@ int _mcp_start_xfer(void)
 
 		msleep(1);
 	}
-
+#ifdef CONFIG_ARCH_RTD16xx
+	ret = ((GET_MCP_STATUS(RTK_MCP_BASE) & ~(MCP_RING_EMPTY | MCP_COMPARE|MCP_KL_DONE|MCP_K_KL_DONE))) ? -1 : 0;
+#else
 	ret = ((GET_MCP_STATUS(RTK_MCP_BASE) & ~(MCP_RING_EMPTY | MCP_COMPARE))) ? -1 : 0;
-
+#endif
 	//mcp_info("after go:\n");
 	//mcp_dump_all_registers();
 

@@ -92,26 +92,49 @@ static int rtk_tveint_en(struct rtk_dptx_device *dptx_dev, int en)
 	return ret;
 }
 
-static void rtk_dptx_hw_init(struct rtk_dptx_device *dptx_dev)
+static void rtk_dptx_disable(struct rtk_dptx_device *dptx_dev)
 {
 	int ret;
 
-	ret = rtk_tveint_en(dptx_dev, 0);
+	dptx_dev->dptx_en = 0;
+	ret = reset_control_status(dptx_dev->lvds_rst);
+	if (ret)
+		return;
+	rtk_tveint_en(dptx_dev, 0);
 	dptx_lvdsint_en(&dptx_dev->hwinfo, 0);
 	msleep(20);
 
 	dptx_close_phy(&dptx_dev->hwinfo);
-
 	reset_control_assert(dptx_dev->lvds_rst);
 	dptx_close_pll(&dptx_dev->hwinfo);
+}
+
+static void rtk_dptx_enable(struct rtk_dptx_device *dptx_dev)
+{
+	int ret = 0;
+	int status;
+
+	status = reset_control_status(dptx_dev->lvds_rst);
+	if (!status) {
+		ret = rtk_tveint_en(dptx_dev, 0);
+		dptx_lvdsint_en(&dptx_dev->hwinfo, 0);
+		msleep(20);
+
+		dptx_close_phy(&dptx_dev->hwinfo);
+		reset_control_assert(dptx_dev->lvds_rst);
+		dptx_close_pll(&dptx_dev->hwinfo);
+	}
+
 	dptx_pixelpll_setting(&dptx_dev->hwinfo);
 	reset_control_deassert(dptx_dev->lvds_rst);
 
 	dptx_dppll_setting(&dptx_dev->hwinfo);
 	dptx_initial(&dptx_dev->hwinfo);
 
-	if(ret == 0)
+	if(!status && ret == 0)
 		rtk_tveint_en(dptx_dev, 1);
+
+	dptx_dev->dptx_en = 1;
 }
 
 static unsigned int vic_to_vo_standard(struct rtk_dptx_hwinfo *hwinfo,
@@ -240,20 +263,12 @@ static long rtk_dptx_ioctl(struct file* filp,
 	struct VIDEO_RPC_VOUT_CONFIG_TV_SYSTEM rpc;
 	struct dptx_format_setting *format = &dptx_dev->format;
 	struct dptx_support_list *list = &dptx_dev->list;
+	struct edid *edid;
 	asoc_dptx_t* cap = &dptx_dev->cap;
 	int mode;
+	int ret;
 
 	switch(cmd) {
-	case DPTX_GET_SINK_CAPABILITY:
-		if(!(cap->sink_cap_available)) {
-			dev_err(dev, "[%s] sink cap is not available\n", __func__);
-			return -ENOMSG;
-		}
-		if(copy_to_user((void __user *)arg, &cap->sink_cap, sizeof(cap->sink_cap))) {
-			dev_err(dev, "[%s] failed to copy to user !\n", __func__);
-			return -EFAULT;
-		}
-		break;
 	case DPTX_CONFIG_TV_SYSTEM:
 		if (copy_from_user(&rpc, (void __user *)arg, sizeof(rpc))) {
 			dev_err(dev, "[%s] failed to copy from user !\n", __func__);
@@ -277,19 +292,40 @@ static long rtk_dptx_ioctl(struct file* filp,
 			hwinfo->out_type = DP_FORMAT_1024_768;
 			break;
 		}
-		rtk_dptx_hw_init(dptx_dev);
+		rtk_dptx_enable(dptx_dev);
 		if(dptx_config_tv_system(&dptx_dev->hwinfo) == true)
 			RPC_TOAGENT_DPTX_Config_TV_System(dptx_dev->rpc_ion_client, &rpc);
 		break;
+
+	case DPTX_GET_SINK_CAPABILITY:
 	case DPTX_GET_EDID_SUPPORT_LIST:
-		if(!(cap->sink_cap_available)) {
-			dev_err(dev, "[%s] sink cap is not available\n", __func__);
-			return -ENOMSG;
-		}
-		gen_dptx_format_support(dptx_dev, &dptx_dev->cap.sink_cap);
-		if (copy_to_user((void __user *)arg, list, sizeof(struct dptx_support_list))) {
-			dev_err(dev, "[%s] failed to copy to user !\n", __func__);
+		if (!dptx_dev->dptx_en)
+			rtk_dptx_enable(dptx_dev);
+		if (dptx_dev->ignore_edid)
 			return -EFAULT;
+		if (!dptx_dev->ignore_edid && !(cap->sink_cap_available)) {
+			ret = dptx_read_edid(&dptx_dev->hwinfo, cap->edid_ptr, 256);
+			if (ret < 0) {
+				dev_err(dev, "Read EDID fail\n");
+				return -EFAULT;
+			}
+			edid = (struct edid *)cap->edid_ptr;
+			memset(&cap->sink_cap, 0, sizeof(struct sink_capabilities_t));
+			dptx_add_edid_modes(edid, &cap->sink_cap);
+			cap->sink_cap_available = true;
+		}
+
+		if(cmd == DPTX_GET_SINK_CAPABILITY) {
+			if(copy_to_user((void __user *)arg, &cap->sink_cap, sizeof(cap->sink_cap))) {
+				dev_err(dev, "[%s] failed to copy to user !\n", __func__);
+				return -EFAULT;
+			}
+		} else {
+			gen_dptx_format_support(dptx_dev, &dptx_dev->cap.sink_cap);
+			if (copy_to_user((void __user *)arg, list, sizeof(struct dptx_support_list))) {
+				dev_err(dev, "[%s] failed to copy to user !\n", __func__);
+				return -EFAULT;
+			}
 		}
 		break;
 	case DPTX_GET_OUTPUT_FORMAT:
@@ -316,10 +352,11 @@ static long rtk_dptx_ioctl(struct file* filp,
 		if (rpc.interfaceType < VO_DISPLAY_PORT_ONLY ||
 			rpc.interfaceType > VO_HDMI_AND_DP_DIFF_SOURCE_WITH_CVBS)
 		{
+			rtk_dptx_disable(dptx_dev);
 			RPC_TOAGENT_DPTX_Config_TV_System(dptx_dev->rpc_ion_client, &rpc);
 			return 0;
 		}
-		rtk_dptx_hw_init(dptx_dev);
+		rtk_dptx_enable(dptx_dev);
 		if(dptx_config_tv_system(&dptx_dev->hwinfo) == true)
 			RPC_TOAGENT_DPTX_Config_TV_System(dptx_dev->rpc_ion_client, &rpc);
 		break;
@@ -364,7 +401,7 @@ static ssize_t rtk_dptx_write(struct file *filp, const char __user *buf,
 	RPC_TOAGENT_DPTX_QUERY_TV_System(dptx_dev->rpc_ion_client, &rpc);
 
 	dptx_dev->hwinfo.out_type = DP_FORMAT_1080P_60;
-	rtk_dptx_hw_init(dptx_dev);
+	rtk_dptx_enable(dptx_dev);
 	dptx_config_tv_system(&dptx_dev->hwinfo);
 
 	rpc.videoInfo.pedType = VO_STANDARD_DP_FORMAT_1920_1080P_60;
@@ -402,6 +439,7 @@ static struct file_operations dptx_fops = {
 static irqreturn_t rtk_dptx_isr(int irq, void *dev_id)
 {
 	struct rtk_dptx_device *dptx_dev = (struct rtk_dptx_device *)dev_id;
+
 	dptx_irq_handle(&dptx_dev->hwinfo);
 
 	return IRQ_HANDLED;
@@ -469,8 +507,8 @@ static int rtk_dptx_probe(struct platform_device *pdev)
 		idx = of_property_match_string(node, "reset-names", "edp");
 	else
 		idx = of_property_match_string(node, "reset-names", "lvds");
+
 	dptx_dev->lvds_rst = of_reset_control_get_by_index(node, idx);
-	reset_control_deassert(dptx_dev->lvds_rst);
 	for (i=0; i<DPTX_RES_MAX; i++) {
 		if (i==idx)
 			continue;
@@ -509,7 +547,6 @@ static int rtk_dptx_probe(struct platform_device *pdev)
 	
 	dptx_dev->hwinfo.out_type = DP_FORMAT_1080P_60;
 
-	rtk_dptx_hw_init(dptx_dev);
 	register_dptx_switch(dptx_dev);
 
 	dev_info(dev, "[%s] finished\n", __func__);
@@ -548,4 +585,3 @@ module_init(rtk_dptx_init);
 module_exit(rtk_dptx_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Realtek Display Port kernel module");
-

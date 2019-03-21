@@ -63,8 +63,10 @@ ex: passing arg 2 of `writeb' makes pointer from integer without a cast
 #define NF_INFO_PRINT(fmt, args...)         printk(KERN_INFO "[NF] Info, " fmt, ## args)
 #define NF_ERR_PRINT(fmt, args...)          printk(KERN_ERR "[NF] Error, " fmt, ## args)
 
-//#define RTK_TEST 1
+#define RTK_TEST 1
 #define RTK_VERIFY 1
+#define WAIT_TIMEOUT	99
+//#define RTK_NAND_SHIFTABLE
 
 /*
  * Searches for a NAND device
@@ -78,6 +80,8 @@ extern int rtk_nand_scan (struct mtd_info *mtd, int maxchips);
 #define	BB_INIT		0xFFFE
 #define	RB_INIT		0xFFFD
 #define	BBT_TAG		0xBBBB
+#define SB_INIT		0xFFAA
+#define SBT_TAG		0xAAAA
 #define TAG_FACTORY_PARAM	(0x82)
 #define BB_DIE_INIT	0xEEEE
 #define RB_DIE_INIT	BB_DIE_INIT
@@ -89,24 +93,11 @@ typedef struct  __attribute__ ((__packed__)){
 	u16 remap_block;
 }BB_t;
 
-typedef struct __attribute__ ((__packed__)){
-	unsigned char	*name;
-	unsigned int	id;
-	uint64_t	size;	//nand total size
-	uint64_t	chipsize;	//die size
-	unsigned int	PageSize;
-	unsigned int	BlockSize;
-	unsigned short	OobSize;
-	unsigned char	num_chips;
-	unsigned char	isLastPage;	//page position of block to check BB
-	unsigned char	CycleID5th; //If CycleID5th do not exist, set it to 0xff
-	unsigned char	CycleID6th; //If CycleID6th do not exist, set it to 0xff
-	unsigned short	ecc_num;
-	unsigned char	T1;
-	unsigned char	T2;
-	unsigned char	T3;
-	unsigned short	eccSelect;//Ecc ability select:   add by alexchang 0319-2010 
-} device_type_t;
+typedef struct {
+	u16 chipnum;
+	u16 block;
+	u16 shift;
+}SB_t;
 
 //for PCBmgr
 typedef enum {
@@ -349,6 +340,7 @@ struct nand_chip {
 	unsigned int block_num;
 	unsigned int page_num;
 	BB_t *bbt;
+	SB_t *sbt;
 	unsigned int RBA;
 	unsigned int RBA_PERCENT;
 	__u32 *erase_page_flag;

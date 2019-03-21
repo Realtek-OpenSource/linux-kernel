@@ -108,7 +108,8 @@
 #define CC_CLK_VE2             14
 #define CC_CLK_VE3             15
 #define CC_CLK_VE2_BPU         16
-#define CC_CLK_MAX             17
+#define CC_PLL_DIF             17
+#define CC_CLK_MAX             18
 
 #endif /* __DT_BINDINGS_RTK_CLOCK_RTD16XX_H */
 

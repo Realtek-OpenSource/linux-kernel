@@ -37,6 +37,7 @@
 #include <soc/realtek/memory.h>
 #include <soc/realtek/rtk_cpu.h>
 #include <uapi/linux/psci.h>
+#include <soc/realtek/rtk_rstctl.h>
 
 #include "rtd16xx_suspend.h"
 
@@ -53,6 +54,7 @@ extern unsigned int suspend_context;
 void __iomem *RTK_CRT_BASE;
 void __iomem *RTK_ISO_BASE;
 void __iomem *RTK_SB2_BASE;
+void __iomem *RTK_RSTCTRL_BASE;
 
 extern void rtk_ddr_calibration_save(void); /* save ddr rx calibration */
 extern void rtk_ddr_calibration_restore(void); /* restore ddr rx calibration */
@@ -62,12 +64,37 @@ extern int psci_system_suspend(unsigned long wakeup_source);
 extern void memory_check_begin(void);
 extern void memory_check_end(void);
 extern void hexdump(char *note, unsigned char *buf, unsigned int len);
+#ifdef CONFIG_RTK_WATCHDOG
+extern int set_wdt_oe(void);
+#else
+static inline int set_wdt_oe(void) { return 0; }
+#endif
 
 struct suspend_param *pcpu_data;
 struct ipc_shm_irda pcpu_data_irda;
 
 extern char wu_en[SUSPEND_ISO_GPIO_SIZE];
 extern char wu_act[SUSPEND_ISO_GPIO_SIZE];
+
+static unsigned int rtk_acpu_check_rpc_flag(void);
+
+static unsigned int rtk_acpu_check_rpc_flag(void)
+{
+	unsigned int i = 0;
+	unsigned int ret = 0;
+
+	struct rtk_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
+
+	for (i = 0 ; i < 1000; i++) {
+		if (readl(&(ipc->audio_rpc_flag)) == 0) {
+			ret = 1;
+			break;
+		}
+		mdelay(1);
+	}
+
+	return ret;
+}
 
 static void rtk_acpu_set_flag(uint32_t flag)
 {
@@ -129,34 +156,24 @@ static int rtk_suspend_wakeup_acpu(void)
 extern void __iomem *wdt_base_export;
 #endif /* CONFIG_THOR_PM_WORKARURD */
 
-#define RESET_MAGIC 0xAABBCC00
-
-typedef enum{
-	RESET_ACTION_NO_ACTION = 0,
-	RESET_ACTION_FASTBOOT,
-	RESET_ACTION_RECOVERY,
-	RESET_ACTION_GOLDEN,
-	RESET_ACTION_ABNORMAL = 0xff,
-}RESET_ACTION;
-
 static void setup_restart_action(RESET_ACTION action)
 {
-	// FIXME
 	unsigned int reset_action = RESET_MAGIC;
-	void *dummy = ioremap(0x98007640, 0x4);
 
-	if (!dummy) {
-		pr_err("%s: unable to map register\n", __func__);
+	if (!RTK_RSTCTRL_BASE) {
+		pr_err("%s: Skip set reset action\n", __func__);
 		return;
 	}
 
 	reset_action |= action;
-	writel(reset_action, dummy);
+	writel(reset_action, RTK_RSTCTRL_BASE);
 }
 
 static void rtk_sys_reset(enum reboot_mode reboot_mode, const char *cmd)
 {
 	if (cmd) {
+		set_wdt_oe();
+
 		if (!strncmp("bootloader", cmd, 11)) {
 			setup_restart_action(RESET_ACTION_FASTBOOT);
 		} else if (!strncmp("recovery", cmd, 9)) {
@@ -167,8 +184,6 @@ static void rtk_sys_reset(enum reboot_mode reboot_mode, const char *cmd)
 	} else {
 		setup_restart_action(RESET_ACTION_NO_ACTION);
 	}
-
-	// FIXME: wdt_oe is not set;
 
 	pr_info("[%s] Power reset\n", DEV);
 #if defined(CONFIG_THOR_PM_WORKARURD)
@@ -182,11 +197,52 @@ static void rtk_sys_reset(enum reboot_mode reboot_mode, const char *cmd)
 #endif /* CONFIG_THOR_PM_WORKARURD */
 };
 
+static void rtk_set_pm_param(unsigned long pcpu_data)
+{
+#if defined(CONFIG_CPU_V7)
+	asm volatile(".arch_extension sec" : : : "cc");
+	asm volatile("isb" : : : "cc");
+	asm volatile("mov r1, %0" : : "r" (__pa(pcpu_data)) : "cc");
+	asm volatile("ldr r0, =0x8400ff04" : : : "cc");
+	asm volatile("isb" : : : "cc");
+	asm volatile("smc #0" : : : "cc");
+	asm volatile("isb" : : : "cc");
+#else
+	asm volatile("isb" : : : "cc");
+	asm volatile("mov x1, %0" : : "r" (__pa(pcpu_data)) : "cc");
+	asm volatile("ldr x0, =0x8400ff04" : : : "cc");
+	asm volatile("isb" : : : "cc");
+	asm volatile("smc #0" : : : "cc");
+	asm volatile("isb" : : : "cc");
+#endif /* CONFIG_CPU_V7 */
+}
+
 static void rtk_power_off(void)
 {
+	int i = 0;
+
 	pr_info("[%s] Power off\n", DEV);
 
 	rtk_notify_acpu(NOTIFY_SUSPEND_TO_COOLBOOT);
+
+	pcpu_data->wakeup_source = htonl(pcpu_data->wakeup_source);
+	pcpu_data->timerout_val = htonl(pcpu_data->timerout_val);
+	pcpu_data->irda_info.dev_count = pcpu_data_irda.dev_count;
+	pcpu_data->irda_info.ipc_shm_ir_magic = pcpu_data_irda.ipc_shm_ir_magic;
+
+	for (i = 0 ; i< 5; i++) {
+		pcpu_data->irda_info.key_tbl[i].protocol = pcpu_data_irda.key_tbl[i].protocol;
+		pcpu_data->irda_info.key_tbl[i].scancode_mask = pcpu_data_irda.key_tbl[i].scancode_mask;
+		pcpu_data->irda_info.key_tbl[i].wakeup_scancode = pcpu_data_irda.key_tbl[i].wakeup_scancode;
+		pcpu_data->irda_info.key_tbl[i].cus_mask = pcpu_data_irda.key_tbl[i].cus_mask;
+		pcpu_data->irda_info.key_tbl[i].cus_code = pcpu_data_irda.key_tbl[i].cus_code;
+	}
+
+	pr_info("[%s] wakeup flags = 0x%x\n", DEV, pcpu_data->wakeup_source);
+
+	flush_cache_all();
+
+	rtk_set_pm_param((unsigned long) pcpu_data);
 
 	psci_sys_poweroff();
 };
@@ -241,6 +297,13 @@ static int rtk_suspend_enter(suspend_state_t state)
 		break;
 	case PM_SUSPEND_MEM:
 		rtk_notify_acpu(NOTIFY_SUSPEND_TO_RAM);
+
+		if (!rtk_acpu_check_rpc_flag()) {
+			pr_err("[%s] ACPU FW not ready to suspend !\n", DEV);
+			ret = -EINVAL;
+			break;
+		}
+
 		pcpu_data->wakeup_source = htonl(pcpu_data->wakeup_source);
 		pcpu_data->timerout_val = htonl(pcpu_data->timerout_val);
 		pcpu_data->irda_info.dev_count = pcpu_data_irda.dev_count;
@@ -262,6 +325,10 @@ static int rtk_suspend_enter(suspend_state_t state)
 		break;
 	}
 
+	/* restore original value */
+	pcpu_data->wakeup_source = htonl(pcpu_data->wakeup_source);
+	pcpu_data->timerout_val = htonl(pcpu_data->timerout_val);
+
 #if RTK_PM_DEBUG
 	memory_check_end();
 #endif /* RTK_PM_DEBUG */
@@ -269,6 +336,9 @@ static int rtk_suspend_enter(suspend_state_t state)
 #if RTK_DDR_CALIBRATION
 	rtk_ddr_calibration_restore();
 #endif /* RTK_DDR_CALIBRATION */
+
+	/* Enable ACPU clock*/
+	writel(readl(RTK_CRT_BASE + 0x58) | 0x000000C0, RTK_CRT_BASE + 0x58);
 
 	writel(readl(RTK_ISO_BASE + 0x0418) | BIT(0), RTK_ISO_BASE + 0x0418);
 	writel(readl(RTK_ISO_BASE + 0x0410) & ~BIT(10), RTK_ISO_BASE + 0x0410);
@@ -337,14 +407,14 @@ const struct platform_suspend_ops rtk_suspend_ops = {
 int __init rtk_suspend_init(void)
 {
 	struct device_node *pm_nd = NULL;
+	struct device_node *rstctl_nd = NULL;
 	const u32 *prop;
 	int size;
-	int temp;
 	int i = 0;
 
 	pr_info("[%s] Initial Power Management\n", DEV);
 
-	pcpu_data = kmalloc(sizeof(struct suspend_param), GFP_KERNEL);
+	pcpu_data = kzalloc(sizeof(struct suspend_param), GFP_KERNEL);
 
 	for(i = 0 ; i < SUSPEND_ISO_GPIO_SIZE ; i++){
 		pcpu_data->wu_gpio_en[i] = wu_en[i];
@@ -377,6 +447,14 @@ int __init rtk_suspend_init(void)
 	suspend_set_ops(&rtk_suspend_ops);
 	pm_power_off = rtk_power_off;
 	arm_pm_restart = rtk_sys_reset;
+
+	/* setup Reset Control */
+	rstctl_nd = of_find_compatible_node(NULL, NULL, "Realtek,rtk-rstctrl");
+	if (rstctl_nd) {
+		RTK_RSTCTRL_BASE = of_iomap(rstctl_nd, 0);
+		pr_info("[rstctrl] addr 0x%p\n", RTK_RSTCTRL_BASE);
+		setup_restart_action(RESET_ACTION_ABNORMAL);
+	}
 
 	return 0;
 }

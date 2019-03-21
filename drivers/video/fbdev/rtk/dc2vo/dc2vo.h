@@ -200,8 +200,14 @@ typedef struct {
     int sfd_refclk;
     int sfd_rbHeader;
     int sfd_rbBase;
-    unsigned int reserve[16-3];
+    long long vo_instance_id;
+    unsigned int reserve[16-5];
 } DC_ION_SHARE_MEMORY ;
+
+typedef struct {
+    long long vo_instance_id;
+    unsigned int reserve[16-2];
+} DC_VO_INSTANCE_INFO;
 
 typedef struct {
     unsigned int enable ;
@@ -330,7 +336,7 @@ struct dc_simple_post_config {
 #define DC2VO_SET_GLOBAL_ALPHA           _IO    (DC2VO_IOC_MAGIC, 20)
 #define DC2VO_SET_VSYNC_FORCE_LOCK       _IO    (DC2VO_IOC_MAGIC, 21)
 #define DC2VO_SIMPLE_POST_CONFIG         _IO    (DC2VO_IOC_MAGIC, 22)
-
+#define DC2VO_GET_VO_INSTANCE_INFO       _IO    (DC2VO_IOC_MAGIC, 23)
 
 /*
  * legacy : DCRT_IRQ, DC_NOHW_MAX_BACKBUFFERS

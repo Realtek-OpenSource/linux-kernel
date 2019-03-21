@@ -9,8 +9,6 @@
  * published by the Free Software Foundation.
  */
 
-#define pr_fmt(fmt) "clk: " fmt
-
 #include <linux/slab.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
@@ -148,13 +146,13 @@ static int rtk_cgc_suspend(struct device *dev)
 	if (RTK_PM_STATE == PM_SUSPEND_STANDBY)
 		return 0;
 #endif
-	dev_info(dev, "[CLK] Enter %s\n", __func__);
+	dev_info(dev, "Enter %s\n", __func__);
 
 	/* create a clk_reg for read/write reg */
 	clk_reg_init(&clk_reg, &cgcd->init_data);
 	cgcd->pm_data = clk_reg_read(&clk_reg, 0);
 
-	dev_info(dev, "[CLK] Exit %s\n", __func__);
+	dev_info(dev, "Exit %s\n", __func__);
 	return 0;
 }
 
@@ -169,7 +167,7 @@ static int rtk_cgc_resume(struct device *dev)
 	if (RTK_PM_STATE == PM_SUSPEND_STANDBY)
 		return 0;
 #endif
-	dev_info(dev, "[CLK] Enter %s\n", __func__);
+	dev_info(dev, "Enter %s\n", __func__);
 
 	clk_reg_init(&clk_reg, &cgcd->init_data);
 
@@ -183,7 +181,7 @@ static int rtk_cgc_resume(struct device *dev)
 
 	clk_reg_update(&clk_reg, 0, mask, val);
 
-	dev_info(dev, "[CLK] Exit %s\n", __func__);
+	dev_info(dev, "Exit %s\n", __func__);
 	return 0;
 }
 
@@ -201,8 +199,6 @@ static int rtk_cgc_probe(struct platform_device *pdev)
 	struct regmap *regmap;
 	int offset = 0;
 	int ret;
-
-	dev_info(&pdev->dev, "[CLK] %s\n", __func__);
 
 	cgcd = devm_kzalloc(dev, sizeof(*cgcd), GFP_KERNEL);
 	if (!cgcd)
@@ -237,7 +233,7 @@ static int rtk_cgc_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, cgcd);
 
 	init_clk_gates(cgcd);
-
+	dev_info(dev, "initialized");
 	return 0;
 error:
 	if (reg)

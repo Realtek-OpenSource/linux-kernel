@@ -2,12 +2,12 @@
 #include <dt-bindings/soc/rtd16xx,memory.h>
 
 /* DRM protect region */
-/memreserve/ 0x10200000 0x03A00000;
-/memreserve/ 0x0F900000 0x00307000;
-/memreserve/ 0x0FC07000 0x001F9000;
-/memreserve/ 0x00000000 0x00001000;
-/memreserve/ 0x00002000 0x00001000;
-/memreserve/ 0x32b00000 0x12C00000;
+/memreserve/ TEE_OS_SLIM_PHYS TEE_OS_SLIM_SIZE;
+/* /memreserve/ 0x0F900000 0x00307000;
+/* /memreserve/ 0x0FC07000 0x001F9000; */
+/* /memreserve/ 0x00000000 0x00001000; */
+/* /memreserve/ 0x00002000 0x00001000; */
+/* /memreserve/ 0x32b00000 0x12C00000; */
 
 /memreserve/ SYS_BOOTCODE_MEMBASE SYS_BOOTCODE_MEMSIZE;
 /memreserve/ RPC_COMM_PHYS RPC_COMM_SIZE;
@@ -36,6 +36,7 @@
 
 #include "rtd-16xx.dtsi"
 #include "rtd-1619-usb.dtsi"
+#include "rtd-1619-sata.dtsi"
 
 / {
 	model= "Realtek_Megingjord_2GB";
@@ -64,7 +65,7 @@
 	chosen {
 		linux,initrd-start = <ROOTFS_NORMAL_START>;
 		linux,initrd-end = <ROOTFS_NORMAL_END>;
-		bootargs = "earlycon=uart8250,mmio32,0x98007800 console=ttyS0,115200 init=/init androidboot.storage=emmc androidboot.hardware=thor androidboot.serialno=thor000 loglevel=4";
+		bootargs = "earlycon=uart8250,mmio32,0x98007800 console=ttyS0,115200 init=/init vmalloc=360M loop.max_part=7 androidboot.storage=emmc androidboot.hardware=thor loglevel=4";
 		swiotlb-memory-reservation-size = <512>; /*  512: 1MB,  2048: 4MB*/
 		swiotlb-force = <0>; /* 0: SWIOTLB_NORMAL, 1: SWIOTLB_FORCE, 2: SWIOTLB_NO_FORCE */
 		cma-region-enable = <1>;
@@ -209,4 +210,55 @@
 		};
 	};
 
+	sdio: sdio@98010A00 {
+		status = "disabled";
+	};
+
+	hdmirx@98034000 {
+		status = "disabled";
+	};
+
+	smartcard@9801BE00 {
+		status = "disabled";
+	};
+
+	spdif {
+		status = "disabled";
+	};
+
+	rfkill: rfkilligpio {
+		status = "disabled";
+	};
+
+	uart1: serial1@9801B200 {
+		status = "disabled";
+	};
+
+	uart2: serial2@9801B400 {
+		status = "disabled";
+	};
+
+	hse@98005000 {
+		status = "disabled";
+	};
+
+	rtk_iso_gpio: rtk_iso_gpio@98007100 {
+		gpios = <&rtk_iso_gpio 60 1 1>;
+		wakeup-gpio-list = <&rtk_iso_gpio 26 0 1>;
+		wakeup-gpio-enable = <0>;
+		wakeup-gpio-activity = <0>;
+	};
+
+	ahci_sata: sata@9803F000 {
+		gpios = <&rtk_iso_gpio 67 1 1>,
+			<&rtk_iso_gpio 62 1 1>,
+			<&rtk_iso_gpio 63 1 1>,
+			<&rtk_iso_gpio 64 1 1>;
+		sata-port@0 {
+			/delete-property/ gpios;
+		};
+		sata-port@1 {
+			/delete-property/ gpios;
+		};
+	};
 };

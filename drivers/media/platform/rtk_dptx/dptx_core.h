@@ -114,6 +114,7 @@ struct rtk_dptx_device {
 	unsigned int ignore_edid;
 	unsigned int dptx_irq;
 
+	unsigned int dptx_en;
 	unsigned int selftest;
 };
 

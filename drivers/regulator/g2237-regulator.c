@@ -1,4 +1,4 @@
- /*
+/*
  * g2237-regulator.c - GMT-G2237 Regulator driver
  *
  * Copyright (C) 2017-2018 Realtek Semiconductor Corporation
@@ -245,6 +245,7 @@ static int g2237_regulator_probe(struct i2c_client *client,
 	}
 
 	i2c_set_clientdata(client, gdev);
+	g22xx_setup_pm_power_off(gdev, G2237_REG_SYS_CONTROL, G2237_SOFTOFF_MASK);
 	return 0;
 }
 
@@ -278,6 +279,7 @@ struct i2c_driver g2237_regulator_driver = {
 	.shutdown = g2237_regulator_shutdown,
 };
 module_i2c_driver(g2237_regulator_driver);
+EXPORT_SYMBOL_GPL(g2237_regulator_driver);
 
 MODULE_DESCRIPTION("GMT G2237 PMIC Driver");
 MODULE_AUTHOR("Cheng-Yu Lee <cylee12@realtek.com>");

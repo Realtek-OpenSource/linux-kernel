@@ -1,1 +1,0 @@
-cmd_drivers/soc/realtek/common/pwrctrl/pwrctrl-rtk.o := ccache arm-linux-gnueabi-ld -EL    -r -o drivers/soc/realtek/common/pwrctrl/pwrctrl-rtk.o drivers/soc/realtek/common/pwrctrl/pwrctrl-pd.o drivers/soc/realtek/common/pwrctrl/pwrctrl-pd-sram.o drivers/soc/realtek/common/pwrctrl/pwrctrl-rtd16xx.o 

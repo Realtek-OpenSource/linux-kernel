@@ -128,7 +128,7 @@ static inline int __hw_to_cc_type(struct clk_hw *hw)
 {
 	const struct clk_ops *ops = hw->init->ops;
 
-	if (ops == &clk_pll_ops || ops == &clk_pll_div_ops)
+	if (clk_hw_is_pll(hw))
 		return CC_CLK_TYPE_CLK_PLL;
 	if (ops == &clk_mmio_mux_ops)
 		return CC_CLK_TYPE_CLK_MUX;
@@ -167,7 +167,7 @@ int cc_init_hw(struct device *dev, struct cc_desc *ccd, int cc_index,
 	}
 #endif
 
-	dev_info(dev, "%s: %s\n", __func__, name);
+	dev_dbg(dev, "%s: start initialize %s\n", __func__, name);
 
 	clk_type = __hw_to_cc_type(hw);
 	switch (clk_type) {
@@ -270,7 +270,7 @@ int cc_init_composite_clk(struct device *dev, struct cc_desc *ccd, int cc_index,
 	}
 #endif
 
-	dev_info(dev, "%s: %s\n", __func__, name);
+	dev_dbg(dev, "%s: start initialize %s\n", __func__, name);
 
 	clk = clk_reg_create_composite_clk(dev, &ccd->init_data, init);
 	if (IS_ERR(clk))

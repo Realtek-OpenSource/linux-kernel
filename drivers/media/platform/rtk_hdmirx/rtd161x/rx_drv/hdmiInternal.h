@@ -180,7 +180,8 @@ typedef enum {
 
 typedef enum {
 	AUDIO_FORMAT_LPCM = 0,
-	AUDIO_FORMAT_NONLPCM
+	AUDIO_FORMAT_NONLPCM,
+	AUDIO_FORMAT_HBR
 } HDMI_AUDIO_FORMAT_T;
 
 typedef enum {
@@ -859,7 +860,7 @@ extern unsigned char lib_hdmi_audio_get_hbr_manual_mode(void);
 extern void lib_hdmi_audio_init(void);
 extern unsigned char hdmi_audio_wait_2_samples(void);
 extern void lib_hdmi_audio_generate(void);
-extern unsigned char lib_hdmi_audio_is_nonpcm(void);
+extern unsigned char lib_hdmi_audio_get_format(void);
 extern unsigned char lib_hdmi_audio_is_output(void);
 extern void lib_hdmi_set_rsv_packet_type(unsigned char index, unsigned char pkt_type);
 extern void lib_hdmi_clear_rsv_packet0_status(void);
@@ -902,6 +903,8 @@ extern u64 lib_hdmi_get_clk90k(void);
 
 
 /* hdmirx_hdcp */
+extern void Hdmi_HdcpFSM(void);
+extern void Hdmi_HdcpInit(void);
 extern unsigned char Is_HdmiRx_hdcp1x_enabled(void);
 
 #endif /* __HDMI_INTERNAL_H_ */

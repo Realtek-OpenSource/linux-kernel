@@ -678,9 +678,27 @@ static int hdmirx_rtk_drv_resume(struct device *dev)
 	return 0;
 }
 
+static int hdmirx_rtk_runtime_suspend(struct device *dev)
+{
+	HDMIRX_DEBUG("Enter %s", __func__);
+
+	HDMIRX_DEBUG("Exit %s", __func__);
+	return 0;
+}
+
+static int hdmirx_rtk_runtime_resume(struct device *dev)
+{
+	HDMIRX_DEBUG("Enter %s", __func__);
+
+	HDMIRX_DEBUG("Exit %s", __func__);
+	return 0;
+}
+
 static const struct dev_pm_ops rtk_hdmirx_pm_ops = {
 	.suspend    = hdmirx_rtk_drv_suspend,
 	.resume     = hdmirx_rtk_drv_resume,
+	.runtime_suspend = hdmirx_rtk_runtime_suspend,
+	.runtime_resume  = hdmirx_rtk_runtime_resume,
 };
 #endif /* CONFIG_SUSPEND */
 

@@ -1,1 +1,0 @@
-cmd_drivers/devfreq/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/devfreq/built-in.o drivers/devfreq/devfreq.o drivers/devfreq/devfreq-event.o drivers/devfreq/governor_simpleondemand.o drivers/devfreq/governor_ondemand.o drivers/devfreq/governor_passive.o drivers/devfreq/realtek/rtk-busfreq.o drivers/devfreq/event/built-in.o 

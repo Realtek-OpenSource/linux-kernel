@@ -7,7 +7,7 @@
 		clocks = <&clk_en_4 CLK_EN_SATA_WRAP_SYS>,
 			<&clk_en_4 CLK_EN_SATA_WRAP_SYSH>;
 		resets = <&rst4 RSTN_SATA_WRAP>;
-/*		sata-phy@0 {
+		sata-phy@0 {
 			reg = <0>;
 			resets = <&rst4 RSTN_SATA_MDIO0>,
 				<&rst4 RSTN_SATA_PHY_POW0>;
@@ -19,14 +19,15 @@
 				<0x77771511>, <0x77775511>, <0x77779511>,
 				<0x00231711>, <0x00235711>, <0x00239711>,
 				<0x00632211>, <0x00636211>, <0x0063a211>,
-				<0x27680311>, <0x27684311>, <0x27688311>;
+				<0x27660311>, <0x276a4311>, <0x27668311>;
+	//		/delete-property/ phy-param;
 			tx-driving = <2>;
 			
 			tx-driving-tbl = // user can define tx driving here //
 					<0x94a72011>, <0x94a76011>, <0x94a7a011>,
 					<0x587a2111>, <0x587a6111>, <0x587aa111>;
 			/delete-property/ tx-driving-tbl;
-		};*/
+		};
 		sata-phy@1 {
 			reg = <1>;
 			resets = <&rst4 RSTN_SATA_MDIO1>,
@@ -39,8 +40,8 @@
 				<0x77771511>, <0x77775511>, <0x77779511>,
 				<0x00231711>, <0x00235711>, <0x00239711>,
 				<0x00632211>, <0x00636211>, <0x0063a211>,
-				<0x27680311>, <0x27684311>, <0x27688311>;
-	/*		/delete-property/ phy-param;*/
+				<0x27660311>, <0x276a4311>, <0x27668311>;
+	//		/delete-property/ phy-param;
 			tx-driving = <2>;
 			
 			tx-driving-tbl = // user can define tx driving here //
@@ -55,7 +56,7 @@
 		resets = <&rst4 RSTN_SATA_MAC_COM>;
 		sata-port@0 {
 			reg = <0>;
-	/*		phys = <&sata_phy 0>;*/
+			phys = <&sata_phy 0>;
 			resets = <&rst4 RSTN_SATA_MAC_P0>;
 			gpios = <&rtk_iso_gpio 65 1 1>;
 		};

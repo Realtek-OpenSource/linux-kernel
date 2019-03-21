@@ -879,11 +879,16 @@ int rtk_cec_set_retry_num(struct rtk_cec *p_this, unsigned long	num)
 
 static cm_buff *rtk_cec_read_message(struct rtk_cec *p_this, unsigned char flags)
 {
+	p_this->status.exit = 0;
 	if (!(flags & NONBLOCK) && p_this->status.enable &&
 				!cmb_queue_len(&p_this->rx_queue)) {
-		if (wait_event_interruptible(p_this->rcv.wq, !p_this->status.enable
+		if (wait_event_interruptible(p_this->rcv.wq, !p_this->status.enable || p_this->status.exit
 					|| cmb_queue_len(&p_this->rx_queue)))
 			return NULL;
+	}
+	if (p_this->status.exit == 1) {
+		p_this->status.exit = 0;
+		return NULL;
 	}
 	if (p_this->status.enable) {
 		cm_buff *cmb = cmb_dequeue(&p_this->rx_queue);
@@ -992,17 +997,19 @@ int rtk_cec_resume(struct rtk_cec *p_this)
 	if(p_this->chip_id == CHIP_ID_RTD1295 ||
 		p_this->chip_id == CHIP_ID_RTD1296) {
 		write_reg32(reg + CEC_CR0, CEC_MODE(1) |
-					LOGICAL_ADDR(0x4) |
+					LOGICAL_ADDR(p_this->standby_logical_addr) |
 					TIMER_DIV(25) |
 					PRE_DIV(255) |
 					UNREG_ACK_EN);
 	} else {
 		write_reg32(reg + CEC_CR0, CEC_MODE(1) |
-					LOGICAL_ADDR(0x4) |
+					LOGICAL_ADDR(p_this->standby_logical_addr) |
 					TIMER_DIV(20) |
 					PRE_DIV(33) |
 					UNREG_ACK_EN);
 	}
+	val = read_reg32(reg + CEC_CR0);
+	pr_info("resume cec control register = 0x%x, logical addr = %d\n", val, p_this->standby_logical_addr);
 	write_reg32(reg + CEC_RTCR0, CEC_PAD_EN | CEC_PAD_EN_MODE | RETRY_NO(2));
 	write_reg32(reg + CEC_RXCR0, RX_EN | RX_INT_EN);
 
@@ -1211,6 +1218,16 @@ static int ops_resume(cec_device *dev)
 	return rtk_cec_resume(p_this);
 }
 
+static int ops_read_exit(cec_device *dev)
+{
+	struct rtk_cec *p_this = cec_get_drvdata(dev);
+
+	p_this->status.exit = 1;
+	wake_up_interruptible(&p_this->rcv.wq);
+
+	return 0;
+}
+
 static cec_driver rtk_cec_driver = {
 	.name			= "cec",
 	.probe			= ops_probe,
@@ -1227,6 +1244,7 @@ static cec_driver rtk_cec_driver = {
 	.set_stanby_mode	= ops_set_stanby_mode,
 	.set_retry_num		= ops_set_retry_num,
 	.get_physical_addr	= ops_get_physical_addr,
+	.read_exit		= ops_read_exit,
 };
 
 static int __init rtk_cec_module_init(void)

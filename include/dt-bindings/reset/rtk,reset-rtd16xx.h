@@ -94,7 +94,7 @@
 #define RSTN_MUX_MIPI           7
 
 /* 0x98000068 */
-#define RSTN_TBP                0
+#define RSTN_TPB                0
 #define RSTN_I2C_4              2
 #define RSTN_I2C_5              4
 #define RSTN_TSIO               6

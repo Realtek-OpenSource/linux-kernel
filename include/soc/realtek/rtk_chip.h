@@ -29,6 +29,7 @@ int get_rtd_chip_id(void);
 enum rtd_chip_revision {
 	RTD_CHIP_A00 = 0xA00,
 	RTD_CHIP_A01 = 0xA01,
+	RTD_CHIP_A02 = 0xA02,
 	RTD_CHIP_B00 = 0xB00,
 	RTD_CHIP_B01 = 0xB01,
 };

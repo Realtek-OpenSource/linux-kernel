@@ -31,6 +31,7 @@ static DECLARE_RWSEM(rw_sem_resume);
 static DECLARE_RWSEM(rw_sem_suspend);
 static DECLARE_RWSEM(rw_sem_rd);
 static DECLARE_RWSEM(rw_sem_wte);
+static DECLARE_RWSEM(rw_sem_wte_ecc);
 static DECLARE_RWSEM(rw_sem_erase);
 static DECLARE_RWSEM(rw_sem_bbt);
 static DECLARE_RWSEM(rw_sem_markbad);
@@ -52,9 +53,7 @@ static unsigned char *tempBuffer = NULL;
 dma_addr_t tempPhys_addr;
 static int bEnterSuspend=0;
 
-#define MTD_SEM_RETRY_COUNT	(0x40)
 #define NOTALIGNED(mtd, x) (x & (mtd->writesize-1)) != 0
-#define NAND_CP_RW_DISABLE (0xFFFFFFFF)
 unsigned int g_eccbits = 0;
 static struct mtd_info *g_rtk_mtd = NULL;
 
@@ -151,6 +150,52 @@ static unsigned long long rtk_from_to_page(struct mtd_info *mtd, loff_t from)
         return (int)(from >> this->page_shift);
 }
 
+#ifdef RTK_NAND_SHIFTABLE
+static int rtk_in_shift_table(struct mtd_info *mtd, unsigned int blk)
+{
+	struct nand_chip *this = (struct nand_chip *) mtd->priv;
+	unsigned int i;
+
+	for ( i=0; i<100; i++) {
+                if ( this->sbt[i].chipnum != SB_INIT ) {
+                        if(blk == this->sbt[i].block) {
+                                return 1;
+                        }
+                }
+        }
+
+	return 0;
+}
+
+static unsigned int rtk_check_shift_table(struct mtd_info *mtd, unsigned int blk)
+{
+        struct nand_chip *this = (struct nand_chip *) mtd->priv;
+        unsigned int i;
+        unsigned int real_blk = blk;
+
+shift_table_recheck:
+        for ( i=0; i<100; i++) {
+                if ( this->sbt[i].chipnum != SB_INIT ) {
+			if(real_blk == this->sbt[i].block) {
+				real_blk = blk + this->sbt[i].shift;
+				break;
+			}
+
+                        if(real_blk < this->sbt[i].block) {
+                                real_blk = blk + (this->sbt[i-1].shift);
+                                break;
+                        }
+                }
+        }
+
+	if(rtk_in_shift_table(mtd, real_blk)) {
+		goto shift_table_recheck;
+	}
+
+        return real_blk;
+}
+#endif
+
 static unsigned int rtk_find_real_blk(struct mtd_info *mtd, unsigned int blk)
 {
 	struct nand_chip *this = (struct nand_chip *) mtd->priv;
@@ -160,6 +205,10 @@ static unsigned int rtk_find_real_blk(struct mtd_info *mtd, unsigned int blk)
 		return real_blk;
 	}
 #endif
+#ifdef RTK_NAND_SHIFTABLE
+	real_blk = rtk_check_shift_table(mtd, real_blk);
+#endif
+
 	for ( i=0; i<RBA; i++){
 		if ( this->bbt[i].bad_block != BB_INIT ){
 			if ( blk == this->bbt[i].bad_block ){
@@ -174,6 +223,7 @@ static unsigned int rtk_find_real_blk(struct mtd_info *mtd, unsigned int blk)
 	return real_blk;
 }
 
+#ifdef RTK_VERIFY
 static void dump_data(const char *data, unsigned int len)
 {
 	int i;
@@ -184,6 +234,28 @@ static void dump_data(const char *data, unsigned int len)
 			*(data+8+(16*i)),*(data+9+(16*i)),*(data+10+(16*i)),*(data+11+(16*i)),*(data+12+(16*i)),*(data+13+(16*i)),*(data+14+(16*i)),*(data+15+(16*i))
 	);
 }
+#endif
+
+#ifdef RTK_NAND_SHIFTABLE
+static void dump_SBT(struct mtd_info *mtd)
+{
+        struct nand_chip *this = (struct nand_chip *) mtd->priv;
+        int i;
+
+        printk("[%s] Nand SBT Content\n", __FUNCTION__);
+
+        for ( i=0; i<100; i++){
+                        if ( i==0 && this->sbt[i].chipnum == SB_INIT ) {
+			NF_INFO_PRINT("Congratulation!! No shift block in this nand.\n");
+                        break;
+                }
+
+                if ( this->sbt[i].block != SB_INIT ){
+                        NF_INFO_PRINT("[%d] (%u, %u, %u)\n", i, this->sbt[i].chipnum, this->sbt[i].block, this->sbt[i].shift);
+                }
+        }
+}
+#endif
 
 static void dump_BBT(struct mtd_info *mtd)
 {
@@ -385,12 +457,12 @@ backup_retry:
                         NF_INFO_PRINT("check OK.\n");
                 }
         }
-#if 0
+#if 1
 	for( i=0; i<6; i++) {
 		this->g_oobbuf[i] = 0x00;
 	}
 
-	rc = this->write_ecc_page (mtd, this->active_chip, start_page, buffer, this->g_oobbuf, phys_addr);
+	rc = this->write_ecc_page (mtd, this->active_chip, start_page, tempBuffer, this->g_oobbuf, (dma_addr_t *)tempPhys_addr);
 #endif
 	if(cmp_data)
 		kfree(cmp_data);
@@ -478,6 +550,7 @@ static int nand_read(struct mtd_info *mtd, loff_t from, size_t len, size_t *retl
 	if(len <= 0){
 		*retlen = 0;
 		NF_ERR_PRINT("%s:%d read non-positive len=%zu\n", __func__, __LINE__, len);
+		up_write(&rw_sem_rd);
 		return 0;
 	}
     	
@@ -530,28 +603,36 @@ static int nand_read_oob (struct mtd_info *mtd, loff_t from, struct mtd_oob_ops 
         unsigned int real_block = 0;
         loff_t new_from = from;
 
+	from += ops->ooboffs;
+
+	if(ops->datbuf != NULL && ops->len != 0) {
+		ops->retlen = 0;
+		nand_read(mtd, from, ops->len, &ops->retlen, ops->datbuf);
+	}
+
 	down_write(&rw_sem_rd);
 
-        from += ops->ooboffs;
-        ops->oobretlen = 0;
+	if(ops->oobbuf != NULL && ops->ooblen != 0) {
+		ops->oobretlen = 0;
 
-        if (NOTALIGNED(mtd, from)) {
-                new_from = from & this->page_idx_mask;
-        }
+		if (NOTALIGNED(mtd, from)) {
+			new_from = from & this->page_idx_mask;
+		}
 
-        page = rtk_from_to_page(mtd, new_from);
-        page_offset =  page % ppb;
-        block = page/ppb;
+		page = rtk_from_to_page(mtd, new_from);
+		page_offset =  page % ppb;
+		block = page/ppb;
 
-        real_block = rtk_find_real_blk(mtd, block);
+		real_block = rtk_find_real_blk(mtd, block);
 
-        real_page = (real_block * ppb) + page_offset;
+		real_page = (real_block * ppb) + page_offset;
 
-	rc = this->read_ecc_page(mtd, this->active_chip, real_page, this->g_databuf, this->g_oobbuf, CP_NF_NONE, (dma_addr_t *)&nrPhys_addr);
+		rc = this->read_ecc_page(mtd, this->active_chip, real_page, this->g_databuf, this->g_oobbuf, CP_NF_NONE, (dma_addr_t *)&nrPhys_addr);
 
-        memcpy(ops->oobbuf, this->g_oobbuf, mtd->oobsize);
+		memcpy(ops->oobbuf, this->g_oobbuf, mtd->oobsize);
 
-        ops->oobretlen = mtd->oobsize;
+		ops->oobretlen = mtd->oobsize;
+	}
 
 	up_write(&rw_sem_rd);
 
@@ -562,7 +643,8 @@ static int nand_read_ecc (struct mtd_info *mtd, loff_t from, size_t len,
 			size_t *retlen, unsigned char *buf, unsigned char *oob_buf, struct nand_oobinfo *oobsel, unsigned char *buf_phy)
 {
 	struct nand_chip *this = mtd->priv;
-	__u64 page, realpage, page_ppb;
+	__u32 page, realpage;
+	__u64 page_ppb;
 	int data_len, oob_len;
 	int rc;
 	__u32 old_page, page_offset, block, real_block;
@@ -599,7 +681,6 @@ static int nand_read_ecc (struct mtd_info *mtd, loff_t from, size_t len,
 
 	while (data_len < len) {
 read_after_backup:
-        	//real_block = rtk_find_real_blk(mtd, (__u32)page/ppb);
         	real_block = rtk_find_real_blk(mtd, block);
 		page = real_block*ppb + page_offset;  
         
@@ -613,10 +694,11 @@ read_after_backup:
 #endif
 		if (rc < 0) {
             		if (rc == -1){
-                		NF_ERR_PRINT("rtk_read_ecc_page: Un-correctable HW ECC Error at page=%llu block:[%u]\n", page, real_block);
+				rc = -1;
+                		NF_ERR_PRINT("rtk_read_ecc_page: Un-correctable HW ECC Error at page=%u block:[%u] real_block:[%u]\n", page, block, real_block);
             		}
 			else if (rc == -2){
-				NF_ERR_PRINT("read_ecc_page: rc:%d read ppb:%u, page:%llu failed\n", rc, ppb, page);
+				NF_ERR_PRINT("read_ecc_page: rc:%d read ppb:%u, page:%u failed\n", rc, ppb, page);
 				NF_ERR_PRINT("Prepare to to backup\n");
 				if(rtk_badblock_handle(mtd, page, 1)) {
 					NF_ERR_PRINT("Finish backup bad block. read after backup.......\n");
@@ -626,6 +708,10 @@ read_after_backup:
 					NF_ERR_PRINT("backup bad block fail.\n");
 					return -1;
 				}
+			} else if ( rc == -WAIT_TIMEOUT ) {
+				NF_ERR_PRINT("WAIT_LOOP timeout, read after nand reset\n");
+				msleep(100);
+				goto read_after_backup;
 			}else{
 				NF_ERR_PRINT("%s: read_ecc_page:  semphore failed\n", __FUNCTION__);
 				return -1;
@@ -634,7 +720,7 @@ read_after_backup:
 
 		data_len += page_size;
 
-		if(oob_buf)//add by alexchang 0524-2010
+		if(oob_buf)
 			oob_len += oob_size;
 		
 		old_page++;
@@ -688,6 +774,50 @@ static int nand_write (struct mtd_info *mtd, loff_t to, size_t len, size_t *retl
 	return rc;
 }
 
+static int nand_write_ext (struct mtd_info *mtd, loff_t to, struct mtd_oob_ops *ops)
+{
+	struct nand_chip *this = mtd->priv;
+	int rc = 0;
+	u_char *new_buf = NULL;
+
+	if (bEnterSuspend){
+		NF_ERR_PRINT("[%s] - prevent cmd execute while in suspend stage\n",__func__);
+		return 0;
+	}
+
+	if (nwBuffer == NULL){
+		nwBuffer = (unsigned char *)dma_alloc_coherent(&mtd->dev, MAX_NW_LENGTH, (dma_addr_t *) (&nwPhys_addr), GFP_DMA | GFP_KERNEL);
+	}
+
+	new_buf = nwBuffer;
+	
+	if (new_buf) {
+		if(ops->datbuf != NULL && ops->len != 0) {
+			memcpy(new_buf, ops->datbuf, ops->len);
+		}
+
+		if(ops->oobbuf != NULL && ops->ooblen != 0) {
+			memcpy(this->g_oobbuf, ops->oobbuf, ops->ooblen);
+		}
+
+		if(ops->datbuf != NULL && ops->oobbuf != NULL) {
+			rc = nand_write_ecc (mtd, to, ops->len, &ops->retlen, new_buf, this->g_oobbuf, NULL, (unsigned char *)nwPhys_addr);
+		} else if(ops->datbuf != NULL && ops->oobbuf == NULL) {
+			rc = nand_write_ecc (mtd, to, ops->len, &ops->retlen, new_buf, NULL, NULL, (unsigned char *)nwPhys_addr);
+		} else if(ops->datbuf == NULL && ops->oobbuf != NULL) {
+			rc = nand_write_ecc (mtd, to, ops->len, &ops->retlen, NULL, this->g_oobbuf, NULL, (unsigned char *)nwPhys_addr);
+		}
+
+		if(rc == 0) {
+			ops->oobretlen = ops->ooblen;
+		} else {
+			NF_ERR_PRINT("nand_write_ext() FAIL\n");
+			ops->oobretlen = 0;
+		}
+	}
+
+	return rc;
+}
 
 static int nand_write_oob (struct mtd_info *mtd, loff_t to, struct mtd_oob_ops *ops)//for 2.6.34 YAFFS-->mtd
 {
@@ -697,19 +827,7 @@ static int nand_write_oob (struct mtd_info *mtd, loff_t to, struct mtd_oob_ops *
 
 	down_write(&rw_sem_wte_oob);
 
-	if (nwBuffer == NULL){
-                nwBuffer = (unsigned char *)dma_alloc_coherent(&mtd->dev, MAX_NW_LENGTH, (dma_addr_t *) (&nwPhys_addr), GFP_DMA | GFP_KERNEL);
-        }
-
-        new_buf = nwBuffer;
-
-        memcpy(new_buf, ops->datbuf, ops->len);
-        memcpy(this->g_oobbuf, ops->oobbuf, ops->ooblen);
-
-        rc = nand_write_ecc (mtd, to, ops->len, &ops->retlen, new_buf, this->g_oobbuf, NULL, (const u_char *)&nwPhys_addr);
-
-        ops->oobretlen = ops->ooblen;
-        ops->retlen = ops->len;
+	rc = nand_write_ext(mtd, to, ops);
 
 	up_write(&rw_sem_wte_oob);
 
@@ -720,7 +838,8 @@ static int nand_write_ecc (struct mtd_info *mtd, loff_t to, size_t len, size_t *
 			const u_char * buf, const u_char *oob_buf, struct nand_oobinfo *oobsel, const u_char * buf_phy)
 {
 	struct nand_chip *this = mtd->priv;
-	__u64 page, realpage, page_ppb;
+	__u32 page, realpage;
+	__u64 page_ppb;
 	int data_len, oob_len;
 	int rc = 0;
 	unsigned int old_page, page_offset, block, real_block;
@@ -739,6 +858,7 @@ static int nand_write_ecc (struct mtd_info *mtd, loff_t to, size_t len, size_t *
 
 	if (NOTALIGNED (mtd, to) || NOTALIGNED(mtd, len)) {
 		NF_ERR_PRINT("nand_write_ecc: Attempt to write not page aligned data mtd size: %x\n", mtd->writesize-1);
+		*retlen = 0;
 		return -EINVAL;
 	}
 
@@ -776,8 +896,12 @@ write_after_backup:
                         rc = -1;
 		} else {
 #endif
-		if(oob_buf) {
+		if (buf && oob_buf) {
 			rc = this->write_ecc_page (mtd, this->active_chip, page, &buf[data_len], &oob_buf[oob_len], (dma_addr_t *)&buf_phy[data_len]);
+		} else if (buf && !oob_buf) {
+			rc = this->write_ecc_page (mtd, this->active_chip, page, &buf[data_len], NULL, (dma_addr_t *)&buf_phy[data_len]);
+		} else if (!buf && oob_buf) {
+			rc = this->write_oob (mtd, this->active_chip, page, oob_size, &oob_buf[oob_len]);
 		} else {
 			rc = this->write_ecc_page (mtd, this->active_chip, page, &buf[data_len], NULL, (dma_addr_t *)&buf_phy[data_len]);
 		}
@@ -786,22 +910,31 @@ write_after_backup:
 
 		if (w_test_flag == 2) {
                         w_test_flag = 0;
-                        NF_ERR_PRINT("Dump page [%llu][%u] after backup. page_offset:[%d]\n", page, real_block, page_offset);
+                        NF_ERR_PRINT("Dump page [%u][%u] after backup. page_offset:[%d]\n", page, real_block, page_offset);
                         rtk_nand_read_block_check(mtd, page);
                         dump_data(&buf[data_len], page_size);
 		}
 #endif
 		if (rc < 0) {
-			NF_ERR_PRINT("%s: write_ecc_page:  write blk:%u, page_offset:[%u]\n", __FUNCTION__, (__u32)page/ppb, page_offset);
-			if(rtk_badblock_handle(mtd, page, 1)) {
-				NF_ERR_PRINT("Finish backup bad block, re-write ...\n");
-				w_test_flag = 2;
+			if (rc == -WAIT_TIMEOUT) {
+				NF_ERR_PRINT("WAIT_LOOP timeout, write after nand reset.\n");
                                 msleep(100);
-				goto write_after_backup;
-                        } else {
-                                NF_ERR_PRINT("backup bad block fail.\n");
-                                return -1;
-                        }	
+                                goto write_after_backup;	
+			}
+			else {
+				NF_ERR_PRINT("%s: write_ecc_page:  write blk:%u, page_offset:[%u]\n", __FUNCTION__, (__u32)page/ppb, page_offset);
+				if(rtk_badblock_handle(mtd, page, 1)) {
+					NF_ERR_PRINT("Finish backup bad block, re-write ...\n");
+#ifdef RTK_VERIFY
+					w_test_flag = 2;
+#endif
+					msleep(100);
+					goto write_after_backup;
+				} else {
+					NF_ERR_PRINT("backup bad block fail.\n");
+					return -1;
+				}
+			}	
 		}
 
 		data_len += page_size;
@@ -832,11 +965,11 @@ static int nand_erase (struct mtd_info *mtd, struct erase_info *instr)
 int nand_erase_nand (struct mtd_info *mtd, struct erase_info *instr, int allowbbt)
 {
 	struct nand_chip *this = (struct nand_chip *)mtd->priv;
-	u_int64_t addr = instr->addr;
-	u_int64_t len = instr->len;
+	u_int32_t addr = instr->addr;
+	u_int32_t len = instr->len;
 	int page, chipnr;
 	int old_page, block, real_block;
-	u_int64_t elen = 0;
+	u_int32_t elen = 0;
 	int rc = 0;
 	int realpage, chipnr_remap;
 	down_write(&rw_sem_erase);
@@ -863,6 +996,7 @@ int nand_erase_nand (struct mtd_info *mtd, struct erase_info *instr, int allowbb
 	
 	instr->state = MTD_ERASING;
 	while (elen < len) {
+erase_after_reset:
 		down_write (&rw_sem_bbt);
 		real_block = rtk_find_real_blk(mtd, block);
 		up_write (&rw_sem_bbt);
@@ -872,9 +1006,16 @@ int nand_erase_nand (struct mtd_info *mtd, struct erase_info *instr, int allowbb
 		rc = this->erase_block (mtd, this->active_chip, page);
 			
 		if (rc) {
-			NF_ERR_PRINT("%s: block erase failed at page address=%llu\n", __FUNCTION__, addr);
-			instr->fail_addr = (page << this->page_shift);
-			rtk_badblock_handle(mtd, page, 0);
+			if (rc == -WAIT_TIMEOUT) {
+                                NF_ERR_PRINT("WAIT_LOOP timeout, erase after nand reset.\n");
+                                msleep(100);
+                                goto erase_after_reset;
+                        }
+			else {
+				NF_ERR_PRINT("%s: block erase failed at page address=%u\n", __FUNCTION__, addr);
+				instr->fail_addr = (page << this->page_shift);
+				rtk_badblock_handle(mtd, page, 0);
+			}
 		}
 		
 		if ( chipnr != chipnr_remap )
@@ -903,16 +1044,13 @@ int nand_erase_nand (struct mtd_info *mtd, struct erase_info *instr, int allowbb
 	return rc;
 }
 
+
 static void nand_sync (struct mtd_info *mtd)
 {
 	struct nand_chip *this = (struct nand_chip *)mtd->priv;
 	this->state = FL_READY;
 }
 
-static int nand_block_isbad (struct mtd_info *mtd, loff_t ofs)
-{
-        return 0;
-}
 
 static int nand_suspend (struct mtd_info *mtd)
 {
@@ -1064,6 +1202,82 @@ void write_oob_test(void)
 }
 #endif
 
+#ifdef RTK_NAND_SHIFTABLE
+static int rtk_nand_get_shift_table(struct mtd_info *mtd, unsigned char *buf_phy)
+{
+	struct nand_chip *this = (struct nand_chip *)mtd->priv;
+	int rc = 0;
+	__u8 issbt_b1, issbt_b2;
+	u8 *temp_SBT=0;
+	u8 mem_page_num;
+	u_char *new_buf = NULL;
+
+	RTK_FLUSH_CACHE((unsigned long) this->sbt, sizeof(SB_t)*100);
+	mem_page_num = (sizeof(SB_t)*100 + page_size-1 )/page_size;
+
+	temp_SBT = kmalloc( mem_page_num*page_size, GFP_KERNEL );
+	if ( !temp_SBT ){
+		NF_ERR_PRINT("%s: Error, no enough memory for temp_SBT\n",__FUNCTION__);
+		return -ENOMEM;
+	}
+	memset( temp_SBT, 0xff, mem_page_num*page_size);
+
+	new_buf = nrBuffer;
+
+	rc = this->read_ecc_page(mtd, this->active_chip, ppb*4, new_buf, this->g_oobbuf, CP_NF_NONE, (dma_addr_t *)&buf_phy[0]);
+	issbt_b1 = this->g_oobbuf[0];
+	NF_DEBUG_PRINT("[%s] issbt_b1:[%x] SBT_TAG:[%x] SBT_TAG >> 8 [%x]\n", __FUNCTION__, issbt_b1, SBT_TAG, SBT_TAG >> 8);
+	if ( !rc ) {
+		if ( issbt_b1 == (SBT_TAG >> 8) ){
+			NF_INFO_PRINT("[%s] Get sbt B1, loads it !!\n", __FUNCTION__);
+			memcpy( temp_SBT, new_buf, page_size );
+			memcpy( this->sbt, temp_SBT, sizeof(SB_t)*100 );
+		}
+		else{
+			NF_INFO_PRINT("[%s] read SBT B1 tags fails, try to load SBT B2\n", __FUNCTION__);
+			rc = this->read_ecc_page(mtd, this->active_chip, ppb*5, new_buf, this->g_oobbuf, CP_NF_NONE, (dma_addr_t *)&buf_phy[0]);
+			issbt_b2 = this->g_oobbuf[0];	
+			NF_INFO_PRINT("[%s] issbt_b2:[%x]!!\n", __FUNCTION__, issbt_b2);
+			if ( !rc ){
+				if ( issbt_b2 == (SBT_TAG >> 8) ){
+					NF_INFO_PRINT("[%s] Get sbt B2, loads it !!\n", __FUNCTION__);
+					memcpy( temp_SBT, new_buf, page_size );
+					memcpy( this->sbt, temp_SBT, sizeof(SB_t)*100 );
+				}else{
+					NF_INFO_PRINT("[%s] read SBT2 fail\n", __FUNCTION__);
+				}
+			}else{
+				NF_INFO_PRINT("[%s] read SBT2 fail.\n", __FUNCTION__);
+			}
+		}
+	}else{
+		NF_INFO_PRINT("[%s] read SBT B1 with HW ECC error, try to load SBT B2\n", __FUNCTION__);
+		rc = this->read_ecc_page(mtd, this->active_chip, ppb*5, new_buf, this->g_oobbuf, CP_NF_NONE, (dma_addr_t *)&buf_phy[0]);
+		issbt_b2 = this->g_oobbuf[0];	
+		if ( !rc ){
+			if ( issbt_b2 == (SBT_TAG >> 8) ){
+				NF_INFO_PRINT("[%s] Get sbt B2, loads it !!\n", __FUNCTION__);
+				memcpy( temp_SBT, new_buf, page_size );
+				memcpy( this->bbt, temp_SBT, sizeof(SB_t)*100 );
+			}else{
+				NF_INFO_PRINT("[%s] read BBT B2 tags fails, nand driver will creat BBT B2\n", __FUNCTION__);
+			}
+		}else{
+			NF_INFO_PRINT("[%s] read SBT B1 and B2 with HW ECC fails\n", __FUNCTION__);
+		}
+	}
+
+	if(!rc) {
+		dump_SBT(mtd);
+	}
+
+	if (temp_SBT)
+		kfree(temp_SBT);
+	
+	return rc;
+}
+#endif
+
 static int rtk_nand_scan_bbt(struct mtd_info *mtd, unsigned char *buf_phy)
 {
 	struct nand_chip *this = (struct nand_chip *)mtd->priv;
@@ -1144,6 +1358,21 @@ static int rtk_nand_scan_bbt(struct mtd_info *mtd, unsigned char *buf_phy)
 	return rc;
 }
 
+static int nand_block_isbad (struct mtd_info *mtd, loff_t ofs)
+{
+        return 0;
+}
+
+static int nand_block_markbad (struct mtd_info *mtd, loff_t to)
+{
+        struct nand_chip *this = mtd->priv;
+        unsigned int page = rtk_from_to_page(mtd, to);
+
+	printk(KERN_ERR "nand_block_markbad(), This function should not be called. page:[%d] block:[%d]\n", page ,page/ppb);
+
+        return 0;
+}
+
 static void rtd_set_nand_info(char *item)
 {
 	int ret = 0;
@@ -1201,9 +1430,13 @@ static int rtd_get_set_nand_info()
 		substr = strsep(&sepstr, delim);
 	}while(substr);
 
-	g_nand_device.OobSize = 64;
 	g_nand_device.num_chips = 1;
 	g_nand_device.isLastPage = 0;
+
+	if(g_nand_device.eccSelect == 0x1)
+		g_nand_device.OobSize = 128;
+	else
+		g_nand_device.OobSize = 64;
 
 	NF_INFO_PRINT("total flash size:[%llu]\n", g_nand_device.size);
 	NF_INFO_PRINT("chip size:[%llu]\n", g_nand_device.chipsize);
@@ -1232,7 +1465,7 @@ int rtk_nand_scan(struct mtd_info *mtd, int maxchips)
 	unsigned char B6th;
 	unsigned int block_size;
 	unsigned int num_chips = 1;
-	uint64_t chip_size=0;
+	uint32_t chip_size=0;
 	unsigned int num_chips_probe = 1;
 	uint64_t result = 0;
 	uint64_t div_res = 0;
@@ -1252,19 +1485,9 @@ int rtk_nand_scan(struct mtd_info *mtd, int maxchips)
 
 	mtd->name = "rtk_nand";
 
-	this->read_id(mtd, id);
-        this->maker_code = maker_code = id[0];
-        this->device_code = device_code = id[1];
-        nand_type_id = maker_code<<24 | device_code<<16 | id[2]<<8 | id[3];
-        B5th = id[4];
-        B6th = id[5];
-
-        NF_INIT_PRINT("READ ID:0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",id[0],id[1],id[2],id[3],id[4],id[5]);
-	NF_INFO_PRINT("NAND Flash Controller detects %d dies\n", num_chips_probe);
-
 	if(rtd_get_set_nand_info() > 0)
 	{
-		NF_INFO_PRINT("Get nand info from lk successfully.\n");
+		NF_INFO_PRINT("Get nand info from bootcode successfully.\n");
 		
 		REG_WRITE_U32( REG_TIME_PARA1+map_base, g_nand_device.T1);
 		REG_WRITE_U32( REG_TIME_PARA2+map_base, g_nand_device.T2);
@@ -1307,22 +1530,28 @@ int rtk_nand_scan(struct mtd_info *mtd, int maxchips)
 		mtd->erasesize_shift = this->phys_erase_shift;
 		mtd->writesize_shift = this->page_shift;
 
-		this->ecc_select = g_nand_device.eccSelect;//add by alexchang 0617-2011.
-
-		if(this->ecc_select >= 0x18)
-			mtd->ecc_strength = 1024;
-		else
-			mtd->ecc_strength = 512;
-
+		this->ecc_select = g_nand_device.eccSelect;
 	}
 	else 
 	{
 		while (1) {
+			this->read_id(mtd, id);
+
+			this->maker_code = maker_code = id[0];
+			this->device_code = device_code = id[1];
+			nand_type_id = maker_code<<24 | device_code<<16 | id[2]<<8 | id[3];
+			B5th = id[4];
+			B6th = id[5];
+
+			NF_INFO_PRINT("READ ID:0x%x 0x%x 0x%x 0x%x 0x%x 0x%x\n",id[0],id[1],id[2],id[3],id[4],id[5]);		
+
+			NF_INFO_PRINT("NAND Flash Controller detects %d dies\n", num_chips_probe);
+
 			for (i = 0; nand_device[i].name; i++){
 
 				if ( nand_device[i].id==nand_type_id && 
 						((nand_device[i].CycleID5th==0xff)?1:(nand_device[i].CycleID5th==B5th))&&
-						((nand_device[i].CycleID6th==0xff)?1:(nand_device[i].CycleID6th==B6th))){
+						((nand_device[i].CycleID6th==0xff)?1:(nand_device[i].CycleID6th==B6th))) {
 					REG_WRITE_U32( REG_TIME_PARA1+map_base,nand_device[i].T1);
 					REG_WRITE_U32( REG_TIME_PARA2+map_base,nand_device[i].T2);
 					REG_WRITE_U32( REG_TIME_PARA3+map_base,nand_device[i].T3);
@@ -1415,13 +1644,7 @@ int rtk_nand_scan(struct mtd_info *mtd, int maxchips)
 			mtd->erasesize_shift = this->phys_erase_shift;
 			mtd->writesize_shift = this->page_shift;
 
-
 			this->ecc_select = nand_device[i].eccSelect;//add by alexchang 0617-2011.
-
-			if(this->ecc_select>=0x18)
-				mtd->ecc_strength = 1024;
-			else
-				mtd->ecc_strength = 512;
 
 			break;
 		}
@@ -1457,6 +1680,11 @@ int rtk_nand_scan(struct mtd_info *mtd, int maxchips)
                         break;
         }
 
+	 if(g_eccbits >= 0x18)
+		mtd->ecc_strength = 1024;
+        else
+		mtd->ecc_strength = 512;
+
 	this->select_chip(mtd, 0);
 			
 	if ( num_chips != num_chips_probe )
@@ -1477,12 +1705,20 @@ int rtk_nand_scan(struct mtd_info *mtd, int maxchips)
 	mtd->dev.coherent_dma_mask = 0xffffffff;
 
 	this->bbt = kmalloc( sizeof(BB_t)*RBA, GFP_KERNEL );
-
 	if ( !this->bbt ){
 		NF_ERR_PRINT("%s: Error, no enough memory for BBT\n",__FUNCTION__);
 		return -1;
 	}
 	memset(this->bbt, 0,  sizeof(BB_t)*RBA);
+
+#ifdef RTK_NAND_SHIFTABLE
+	this->sbt = kmalloc( sizeof(SB_t)*100, GFP_KERNEL );
+	if ( !this->sbt ){
+		NF_ERR_PRINT("%s: Error, no enough memory for SBT\n",__FUNCTION__);
+		return -1;
+	}
+	memset(this->sbt, 0,  sizeof(SB_t)*100);
+#endif
 
 	nrBuffer = (unsigned char *)dma_alloc_coherent(&mtd->dev, MAX_NR_LENGTH, (dma_addr_t *) (&nrPhys_addr), GFP_DMA | GFP_KERNEL);
 	if ( !nrBuffer ) {
@@ -1507,14 +1743,14 @@ int rtk_nand_scan(struct mtd_info *mtd, int maxchips)
 
 	flag_size =  (this->numchips * this->page_num) >> 3;
 	mempage_order = get_order(flag_size);
-	
+#if 0	
 	this->erase_page_flag = (void *)__get_free_pages(GFP_KERNEL, mempage_order);	
 	if ( !this->erase_page_flag ){
 		NF_ERR_PRINT("%s: Error, no enough memory for erase_page_flag\n",__FUNCTION__);
 		return -ENOMEM;
 	}
 	memset ( (__u32 *)this->erase_page_flag, 0, flag_size);
-
+#endif
 	mtd->type		= MTD_NANDFLASH;
 	mtd->flags		= MTD_CAP_NANDFLASH;
 	mtd->_erase		= nand_erase;
@@ -1531,9 +1767,15 @@ int rtk_nand_scan(struct mtd_info *mtd, int maxchips)
 	mtd->_resume		= nand_resume;
 	mtd->owner		= THIS_MODULE;
 	mtd->_block_isbad	= nand_block_isbad;
-	mtd->_block_markbad	= NULL; //nand_block_markbad;
+	mtd->_block_markbad	= nand_block_markbad;
 	mtd->_panic_write	= NULL; //panic_nand_write;
 	mtd->owner = THIS_MODULE;
+
+#ifdef RTK_NAND_SHIFTABLE
+	if(rtk_nand_get_shift_table(mtd, (unsigned char *)nrPhys_addr) < 0) {
+                return -1;
+	}
+#endif
 
 	return this->scan_bbt(mtd, (unsigned char *)nrPhys_addr);
 }

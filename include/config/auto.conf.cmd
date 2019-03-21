@@ -67,6 +67,7 @@ deps_config := \
 	fs/logfs/Kconfig \
 	fs/ubifs/Kconfig \
 	fs/jffs2/Kconfig \
+	fs/yaffs2/Kconfig \
 	fs/efs/Kconfig \
 	fs/bfs/Kconfig \
 	fs/befs/Kconfig \
@@ -184,20 +185,26 @@ deps_config := \
 	drivers/memory/samsung/Kconfig \
 	drivers/memory/Kconfig \
 	drivers/extcon/Kconfig \
+	drivers/devfreq/realtek/Kconfig \
 	drivers/devfreq/event/Kconfig \
 	drivers/devfreq/Kconfig \
 	drivers/soc/realtek/xen/Kconfig \
+	drivers/soc/realtek/rtd13xx/rtk_ve/Kconfig \
 	drivers/soc/realtek/rtd13xx/Kconfig \
 	drivers/soc/realtek/rtd16xx/rtk_ve/Kconfig \
 	drivers/soc/realtek/rtd16xx/Kconfig \
 	drivers/soc/realtek/rtd139x/rtk_ve/Kconfig \
 	drivers/soc/realtek/rtd139x/Kconfig \
+	drivers/soc/realtek/rtd129x/hw_nat/Kconfig \
 	drivers/soc/realtek/rtd129x/rtk_ve/Kconfig \
 	drivers/soc/realtek/rtd129x/cwmp/Kconfig \
 	drivers/soc/realtek/rtd129x/Kconfig \
-	drivers/soc/realtek/common/Kconfig.workaround \
+	drivers/soc/realtek/common/perfcnt/Kconfig \
+	drivers/soc/realtek/common/debug/Kconfig \
+	drivers/soc/realtek/common/hse/Kconfig \
 	drivers/soc/realtek/common/pwrctrl/Kconfig \
 	drivers/soc/realtek/common/rpc/Kconfig \
+	drivers/soc/realtek/common/Kconfig.workaround \
 	drivers/soc/realtek/common/Kconfig \
 	drivers/soc/realtek/rtd119x/rtk_ve/Kconfig \
 	drivers/soc/realtek/rtd119x/Kconfig \
@@ -1173,6 +1180,7 @@ deps_config := \
 	arch/arm/mach-artpec/Kconfig \
 	arch/arm/mach-alpine/Kconfig \
 	arch/arm/mach-mvebu/Kconfig \
+	arch/arm/mach-rtd13xx/Kconfig \
 	arch/arm/mach-rtd16xx/Kconfig \
 	arch/arm/mach-rtd139x/Kconfig \
 	arch/arm/mach-rtd129x/Kconfig \

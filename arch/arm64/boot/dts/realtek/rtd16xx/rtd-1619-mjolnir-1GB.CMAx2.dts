@@ -2,7 +2,7 @@
 #include <dt-bindings/soc/rtd16xx,memory.h>
 
 /* DRM protect region */
-/* /memreserve/ 0x10200000 0x03A00000; */
+/memreserve/ TEE_OS_SLIM_PHYS TEE_OS_SLIM_SIZE;
 /* /memreserve/ 0x0F900000 0x00307000; */
 /* /memreserve/ 0x0FC07000 0x001F9000; */
 /* /memreserve/ 0x00000000 0x00001000; */
@@ -64,7 +64,7 @@
 	chosen {
 		linux,initrd-start = <ROOTFS_NORMAL_START>;
 		linux,initrd-end = <ROOTFS_NORMAL_END>;
-		bootargs = "earlycon=uart8250,mmio32,0x98007800 console=ttyS0,115200 init=/init androidboot.storage=emmc androidboot.hardware=thor androidboot.serialno=thor000 loglevel=4";
+		bootargs = "earlycon=uart8250,mmio32,0x98007800 console=ttyS0,115200 init=/init androidboot.storage=emmc androidboot.hardware=thor loglevel=4";
 		swiotlb-memory-reservation-size = <512>; /*  512: 1MB,  2048: 4MB*/
 		swiotlb-force = <0>; /* 0: SWIOTLB_NORMAL, 1: SWIOTLB_FORCE, 2: SWIOTLB_NO_FORCE */
 		cma-region-enable = <1>;

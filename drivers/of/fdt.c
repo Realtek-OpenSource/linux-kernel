@@ -36,6 +36,7 @@
 
 int saving_section_page_table_xen_low;
 int saving_section_page_table;
+int free_logo_reserved_region;
 unsigned long logo_start_addr;
 unsigned long logo_size;
 unsigned long logo_start_addr_bak;
@@ -1223,6 +1224,13 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 	} else if (strcmp(type, "memory") != 0)
 		return 0;
 
+	reg = of_get_flat_dt_prop(node, "free-logo-reserved-region", &l);
+	if (reg) {
+		free_logo_reserved_region = of_read_number(reg, 1);
+	}
+	printk(KERN_ERR "\033[1;33m" "DT: free_logo_reserved_region %d" "\033[m\n",
+		free_logo_reserved_region);
+
 	reg = of_get_flat_dt_prop(node, "saving-section-page-table", &l);
 	if (reg) {
 		saving_section_page_table = of_read_number(reg, 1);
@@ -1449,6 +1457,7 @@ bool __init early_init_dt_scan(void *params)
 
 	saving_section_page_table_xen_low = 0;
 	saving_section_page_table = 0;
+	free_logo_reserved_region = 0;
 
 	status = early_init_dt_verify(params);
 	if (!status)

@@ -1,1 +1,0 @@
-cmd_drivers/staging/android/ion/realtek/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/staging/android/ion/realtek/built-in.o drivers/staging/android/ion/realtek/ion_rtk.o drivers/staging/android/ion/realtek/ion_rtk_carveout_heap.o 

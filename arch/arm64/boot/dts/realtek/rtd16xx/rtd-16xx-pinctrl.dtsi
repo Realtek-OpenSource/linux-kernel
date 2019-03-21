@@ -58,9 +58,7 @@
 		uart2_pins_0: uart2_pins_0 {
 			realtek,pins = "ur2_loc",
 			"gpio_2",
-			"gpio_3",
-			"gpio_4",
-			"gpio_5";
+			"gpio_3";
 			realtek,function = "uart2_loc0";
 		};
 
@@ -115,6 +113,11 @@
 			realtek,pins = "gpio_5",
 			"gpio_6";
 			realtek,function = "i2c5";
+		};
+
+		spi_pins_enable: spi-pins-enable {
+			realtek,pins = "sf_en";
+			realtek,function = "sf_enable";
 		};
 
 		spi_pins_loc_spi: spi_pins_loc_spi {
@@ -366,6 +369,10 @@
 			realtek,function = "lx_ejtag_loc1";
 		};
 
+		acpu_ejtag_pins_disable:acpu_ejtag_pins_disable{
+			realtek,pins = "ejtag_avcpu_loc";
+			realtek,function = "lx_ejtag_disable";
+		};
 		dc_fan_sensor_pins: dc_fan_sensor_pins {
 			realtek,pins = "gpio_47";
 			realtek,function = "dc_fan_sensor";
@@ -419,6 +426,11 @@
 		usb_cc2_pins: usb_cc2_pins {
 			realtek,pins = "usb_cc2";
 			realtek,function = "usb_cc2";
+		};
+
+		demod_pins: demod-pins {
+			realtek,pins = "demod_agc";
+			realtek,function = "qam_agc_if";
 		};
 
 		/*rtc_pins: rtc_pins {

@@ -1,5 +1,0 @@
-kernel/drivers/mmc/host/rtkemmc.ko
-kernel/drivers/mmc/host/sdhci.ko
-kernel/drivers/mmc/host/sdhci-pltfm.ko
-kernel/drivers/mmc/host/sdhci-rtk.ko
-kernel/drivers/mmc/host/rtk-sdmmc.ko

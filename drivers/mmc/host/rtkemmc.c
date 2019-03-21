@@ -258,7 +258,27 @@ static struct rtk_host_ops emmc_ops = {
 	.restore_regs   = rtkemmc_restore_registers,
 };
 
+#if defined(CONFIG_MMC_RTK_EMMC_HW_SEMAPHORE)
+static int rtkemmc_request_hw_semaphore(void *iomem, unsigned int cnt)
+{
+	unsigned int val;
+	int i;
 
+	for (i=0; i<cnt; i++) {
+		val = readl(iomem);
+		if (val)
+			return 0;
+		msleep(10);
+	}
+	pr_err("rtk emmc get hw semaphore timeout\n");
+	return -1;
+}
+
+static void rtkemmc_release_hw_semaphore(void *iomem)
+{
+	writel(0, iomem);
+}
+#endif
 //---------------------------------------------------------------------------------------------------------------------------
 #ifdef CONFIG_RTK_ACPU_RELOAD
 //this part is set for avcpu.c usage
@@ -481,6 +501,8 @@ static int rtkemmc_prepare_hs400_tuning(struct mmc_host *host, struct mmc_ios *i
 #ifdef CONFIG_ARCH_RTD129x
 	unsigned long flags2;
 #endif
+	if(host->doing_retune == 1) return 0;
+
 	struct rtkemmc_host *emmc_port;
         emmc_port = mmc_priv(host);
 	printk(KERN_ERR "Prepare HS400 mode...\n");
@@ -1578,6 +1600,9 @@ static int rtkemmc_execute_tuning(struct mmc_host *host, u32 opcode)
 {
 	struct rtkemmc_host *emmc_port;
 	struct sd_cmd_pkt cmd_info;
+
+	if(host->doing_retune == 1) return 0;
+
 	MMCPRINTF("%s \n", __func__);
 
 	emmc_port = mmc_priv(host);
@@ -4948,6 +4973,9 @@ static void rtkemmc_request(struct mmc_host *host, struct mmc_request *mrq)
 		}
 	}
 
+#if defined(CONFIG_MMC_RTK_EMMC_HW_SEMAPHORE)
+	rtkemmc_request_hw_semaphore(emmc_port->hw_semaphore, 5);
+#endif
 	down_write(&cr_rw_sem);
 	cmd = mrq->cmd;
 	emmc_port->mrq = mrq;
@@ -4991,6 +5019,9 @@ done:
 		cmd_resend=0;
 		down_speed_handling(emmc_port);
 	}
+#if defined(CONFIG_MMC_RTK_EMMC_HW_SEMAPHORE)
+	rtkemmc_release_hw_semaphore(emmc_port->hw_semaphore);
+#endif
 }
 
 static ssize_t emmc_info_dev_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -5147,6 +5178,17 @@ static int rtkemmc_probe(struct platform_device *pdev)
 	//rtk_lockapi_unlock2(flags2, _at_("rtkemmc_probe"));
         isb();
         sync(emmc_port);
+#endif
+
+#if defined(CONFIG_MMC_RTK_EMMC_HW_SEMAPHORE)
+	unsigned int addr;
+	if (of_property_read_u32(pdev->dev.of_node, "hw-semaphore", &addr)) {
+		addr = 0x9801a63c;
+		pr_err("EMMC : can't find hw semaphore in dtb, use default - 0x%x\n", addr);
+	} else {
+		pr_info("EMMC : find hw semaphore in dtb, 0x%x\n", addr);
+	}
+	emmc_port->hw_semaphore = ioremap(addr, 1);
 #endif
 
 #if defined(CONFIG_ARCH_RTD139x)
@@ -5469,6 +5511,9 @@ static int __exit rtkemmc_remove(struct platform_device *pdev)
 #endif
 #ifdef DBG_PORT
 		iounmap(emmc_port->sb2_debug_membase);
+#endif
+#if defined(CONFIG_MMC_RTK_EMMC_HW_SEMAPHORE)
+		iounmap(emmc_port->hw_semaphore);
 #endif
 		release_resource(emmc_port->res);
 		mmc_free_host(mmc);

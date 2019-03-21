@@ -33,6 +33,7 @@ extern unsigned long logo_start_addr;
 extern unsigned long logo_size;
 extern unsigned long logo_start_addr_bak;
 extern unsigned long logo_size_bak;
+extern int free_logo_reserved_region;
 
 static struct memblock_region memblock_memory_init_regions[INIT_MEMBLOCK_REGIONS] __initdata_memblock;
 static struct memblock_region memblock_reserved_init_regions[INIT_MEMBLOCK_REGIONS] __initdata_memblock;
@@ -1900,15 +1901,13 @@ static int __init memblock_init_debugfs(void)
 #ifdef CONFIG_HAVE_MEMBLOCK_PHYS_MAP
 	debugfs_create_file("physmem", S_IRUGO, root, &memblock.physmem, &memblock_debug_fops);
 #endif
-#if 0 /* might create new of attribute to enable or disable this function */
-#if defined(CONFIG_ARM64) && defined(CONFIG_64BIT)
-	if( logo_start_addr && logo_size ) {
+#if 1 /* might create new of attribute to enable or disable this function */
+	if( free_logo_reserved_region && logo_start_addr && logo_size ) {
 		if (memblock_is_memory(logo_start_addr))
 			memblock_init_free_logo_kthread();
 		else
 			pr_info("logo:0x%llx not in memory region\n", logo_start_addr);
 	}
-#endif
 #endif
 	return 0;
 }

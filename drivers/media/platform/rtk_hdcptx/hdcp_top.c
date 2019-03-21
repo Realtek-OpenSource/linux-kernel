@@ -654,7 +654,7 @@ static long hdcp_set_param_key14(void __user *argp)
 		return -EFAULT;
 	}
 
-	ta_hdcp_set_param_key(&key);
+	ta_hdcp_set_param_key((unsigned char *)&key);
 
 	return 0;
 }

@@ -67,5 +67,6 @@ int ops_get_edid_support_list(void __user *arg, asoc_hdmi_t *data);
 int ops_set_output_format(void __user *arg);
 int ops_get_output_format(void __user *arg);
 int ops_set_interface_type(void __user *arg);
+int ops_get_config_tv_system(void __user *arg);
 
 #endif  //__HDMITX_API_H__

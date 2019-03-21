@@ -13,6 +13,7 @@
 
 #include <soc/realtek/rtk_ipc_shm.h>
 #include <soc/realtek/rtk_pm.h>
+#include <soc/realtek/rtk_ir.h>
 
 #define SETMASK(bits, pos) (((-1U) >> (32-bits)) << (pos))
 #define CLRMASK(bits, pos) (~(SETMASK(bits, pos)))
@@ -120,7 +121,8 @@ struct suspend_param {
 	unsigned int timerout_val;
 	char wu_gpio_en[SUSPEND_ISO_GPIO_SIZE];
 	char wu_gpio_act[SUSPEND_ISO_GPIO_SIZE];
-}__attribute__((packed));;
+	struct ipc_shm_irda irda_info;
+}__attribute__((packed));
 
 extern const char *const rtk_suspend_resume_states[RESUME_MAX_STATE];
 extern const char *const rtk_suspend_wakeup_states[eWAKEUP_ON_MAX];

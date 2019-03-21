@@ -49,7 +49,7 @@ int timeout = HZ / 40; /* jiffies */
 
 RPC_DEV_EXTRA rpc_intr_extra[RPC_NR_DEVS / RPC_NR_PAIR];
 
-extern void rpc_send_interrupt(void);
+extern void rpc_send_interrupt(int type);
 
 
 
@@ -67,9 +67,14 @@ typedef struct r_program_entry
 static r_program_entry_t *r_program_head = NULL;
 static int r_program_count = 0;
 
-struct task_struct *r_program_kthread;
-wait_queue_head_t r_program_waitQueue;
-int r_program_flag = 0;
+struct task_struct *acpu_r_program_kthread;
+wait_queue_head_t acpu_r_program_waitQueue;
+int acpu_r_program_flag = 0;
+
+struct task_struct *vcpu_r_program_kthread;
+wait_queue_head_t vcpu_r_program_waitQueue;
+int vcpu_r_program_flag = 0;
+
 
 static void r_program_add(r_program_entry_t * entry)
 {
@@ -213,7 +218,7 @@ out:
 }
 
 
-ssize_t r_program_write(RPC_DEV_EXTRA *extra, RPC_DEV *dev, char *buf, size_t count)
+ssize_t r_program_write(int opt, RPC_DEV_EXTRA *extra, RPC_DEV *dev, char *buf, size_t count)
 {
 
 	int temp, size;
@@ -299,12 +304,11 @@ ssize_t r_program_write(RPC_DEV_EXTRA *extra, RPC_DEV *dev, char *buf, size_t co
 	rtk_rpc_wmb(AVCPU2SCPU(dev->ringStart),
 			PAGE_ALIGN(rpc_ring_size));
 
-#if 1
-	rpc_send_interrupt();
-#else
-		/* audio */
-		writel((RPC_INT_SA | RPC_INT_WRITE_1), rpc_int_base+RPC_SB2_INT);
-#endif
+	if (opt == RPC_AUDIO)
+		rpc_send_interrupt(RPC_AUDIO);
+	else if (opt == RPC_VIDEO)
+		rpc_send_interrupt(RPC_VIDEO);
+
 	up_write(&dev->ptrSync->writeSem);
 	return ret;
 out:
@@ -329,17 +333,23 @@ void rpc_ion_handler(RPC_DEV_EXTRA *extra)
 	RPC_STRUCT *rpc;
 	RPC_STRUCT *rrpc;
 	unsigned long map_addr;
-	RPC_DEV_EXTRA *extra_w = &rpc_intr_extra[0];
+	RPC_DEV_EXTRA *extra_w;
 	r_program_entry_t *rpc_entry;
+	int opt = 0;
 
-
+	if(!strcmp(extra->name, "AudioIntrRead")) {
+		extra_w = &rpc_intr_extra[0];
+		opt = RPC_AUDIO;
+	} else if (!strcmp(extra->name, "Video1IntrRead")){
+		extra_w = &rpc_intr_extra[2];
+		opt = RPC_VIDEO;
+	}
+	pr_debug("[%s] handle %s rpc\n", extra->name);
 	if (r_program_read(extra, extra->dev, (char *) &tmpbuf, sizeof(RPC_STRUCT) + sizeof(uint32_t)) != (sizeof(RPC_STRUCT) + sizeof(uint32_t))) {
 		pr_err("[%s] remote allocate read error...\n", __func__);
 		return;
 	}
-	spin_lock_bh(&extra->lock);
-	r_program_flag = 0;
-	spin_unlock_bh(&extra->lock);
+
 	rpc = (RPC_STRUCT *)(tmpbuf);
 
 	//convert_rpc_struct(extra->name, rpc);
@@ -351,9 +361,7 @@ void rpc_ion_handler(RPC_DEV_EXTRA *extra)
 		align = PAGE_SIZE;
 		tmp = (uint32_t *)(tmpbuf + sizeof(RPC_STRUCT));
 		alloc_val = PAGE_ALIGN(ntohl(*tmp));
-		if ((ntohl(rpc->mycontext) & 0x1) == 0) {
-			align = (1 << 14);
-		}
+
 		rpc->mycontext = htonl(ntohl(rpc->mycontext) & 0xfffffffc);
 
 		handle = ion_alloc(fw_rpc_ion_client, alloc_val, align,
@@ -375,6 +383,7 @@ void rpc_ion_handler(RPC_DEV_EXTRA *extra)
 #else
 		reply_value = phys_addr;
 #endif
+		pr_debug("[%s] ion_alloc addr : 0x%x\n", __func__, reply_value);
 	} else if(ntohl(rpc->procedureID) == 2) { /*free*/
 		tmp = (uint32_t *)(tmpbuf + sizeof(RPC_STRUCT));
 #if defined(CONFIG_ARCH_RTD129x) || defined(CONFIG_ARCH_RTD119X)
@@ -395,15 +404,17 @@ void rpc_ion_handler(RPC_DEV_EXTRA *extra)
 		align = PAGE_SIZE;
 		tmp = (uint32_t *)(tmpbuf + sizeof(RPC_STRUCT));
 		alloc_val = PAGE_ALIGN(ntohl(*tmp));
-		if ((ntohl(rpc->mycontext) & 0x1) == 0) {
-			align = (1 << 14);
-		}
 		rpc->mycontext = htonl(ntohl(rpc->mycontext) & 0xfffffffc);
 
+#if (defined(CONFIG_ARCH_RTD139x) && defined(CONFIG_RTK_VMX_DRM))
+		handle = ion_alloc(fw_rpc_ion_client, alloc_val, align,
+			RTK_PHOENIX_ION_HEAP_SECURE_MASK,
+			ION_FLAG_NONCACHED | ION_FLAG_SECURE_AUDIO);
+#else
 		handle = ion_alloc(fw_rpc_ion_client, alloc_val, align,
 			RTK_PHOENIX_ION_HEAP_SECURE_MASK,
 			ION_FLAG_NONCACHED  | ION_FLAG_HWIPACC);
-
+#endif
 		if (IS_ERR(handle)) {
 			pr_err("[%s] ERROR: secure ion_alloc fail %d\n", __func__, (int *) handle);
 		}
@@ -419,6 +430,7 @@ void rpc_ion_handler(RPC_DEV_EXTRA *extra)
 #else
 		reply_value = phys_addr;
 #endif
+		pr_debug("[%s] ion_alloc addr : 0x%x\n", __func__, reply_value);
 	}
 
 	/*Reply RPC*/
@@ -439,7 +451,7 @@ void rpc_ion_handler(RPC_DEV_EXTRA *extra)
 	*(tmp+0) = rpc->taskID; /* FIXME: should be 64bit */
 	*(tmp+1) = htonl(reply_value);
 
-	if (r_program_write(extra_w, extra_w->dev, (char *) &replybuf, sizeof(RPC_STRUCT) + 2*sizeof(uint32_t)) != (sizeof(RPC_STRUCT) + 2*sizeof(uint32_t))) {
+	if (r_program_write(opt, extra_w, extra_w->dev, (char *) &replybuf, sizeof(RPC_STRUCT) + 2*sizeof(uint32_t)) != (sizeof(RPC_STRUCT) + 2*sizeof(uint32_t))) {
 		pr_err("[%s] remote allocate reply error...\n", __func__);
 		return;
 	}
@@ -447,12 +459,12 @@ void rpc_ion_handler(RPC_DEV_EXTRA *extra)
 }
 
 
-static int remote_alloc_thread(void * p)
+static int acpu_remote_alloc_thread(void * p)
 {
 	RPC_DEV_EXTRA *extra = &rpc_intr_extra[1];
 
 	while (1) {
-		if (wait_event_interruptible(r_program_waitQueue, r_program_flag || kthread_should_stop())) {
+		if (wait_event_interruptible(acpu_r_program_waitQueue, acpu_r_program_flag || kthread_should_stop())) {
 			pr_notice("%s got signal or should stop...\n", current->comm);
 			continue;
 		}
@@ -461,10 +473,39 @@ static int remote_alloc_thread(void * p)
 			pr_notice("%s exit...\n", current->comm);
 			break;
 		}
+		spin_lock_bh(&extra->lock);
+		acpu_r_program_flag = 0;
+		spin_unlock_bh(&extra->lock);
 		rpc_ion_handler(extra);
 	}
 	return 0;
 }
+
+
+#ifdef CONFIG_ARCH_RTD13xx
+static int vcpu_remote_alloc_thread(void * p)
+{
+	RPC_DEV_EXTRA *extra = &rpc_intr_extra[3];
+
+	while (1) {
+		if (wait_event_interruptible(vcpu_r_program_waitQueue, vcpu_r_program_flag || kthread_should_stop())) {
+			pr_notice("%s got signal or should stop...\n", current->comm);
+			continue;
+		}
+
+		if (kthread_should_stop()) {
+			pr_notice("%s exit...\n", current->comm);
+			break;
+		}
+		spin_lock_bh(&extra->lock);
+		vcpu_r_program_flag = 0;
+		spin_unlock_bh(&extra->lock);
+		rpc_ion_handler(extra);
+	}
+	return 0;
+}
+#endif
+
 
 /*
  * This function may be called by tasklet and rpc_intr_read(),
@@ -511,13 +552,25 @@ void rpc_dispatch(unsigned long data)
 		out += rpc.parameterSize;
 		if (out >= dev->ringEnd)
 			out = dev->ringStart + (out - dev->ringEnd);
-
-		spin_lock_bh(&extra->lock);
-		update_nextRpc(extra, out);
-		r_program_flag = 1;
-		wake_up_interruptible(&r_program_waitQueue);
-		spin_unlock_bh(&extra->lock);
-
+		if ((rpc.mycontext & 0x1) == 1) {/*audio remote allocate*/
+			spin_lock_bh(&extra->lock);
+			update_nextRpc(extra, out);
+			acpu_r_program_flag = 1;
+			wake_up_interruptible(&acpu_r_program_waitQueue);
+			spin_unlock_bh(&extra->lock);
+		}
+#ifdef CONFIG_ARCH_RTD13xx
+		else if ((rpc.mycontext & 0x1) == 0){/*video remote allocate*/
+			spin_lock_bh(&extra->lock);
+			update_nextRpc(extra, out);
+			vcpu_r_program_flag = 1;
+			wake_up_interruptible(&vcpu_r_program_waitQueue);
+			spin_unlock_bh(&extra->lock);
+		}
+#endif
+		else {
+			pr_err("[%s] Unknow Request Remote Allocate\n");
+		}
 		return;
 #else
 #ifdef CONFIG_REALTEK_RPC_PROGRAM_REGISTER
@@ -619,6 +672,9 @@ int rpc_intr_init(void)
 	int result = 0, i;
 	is_init = 0;
 	int j = 0;
+	struct ion_handle *handle = NULL;
+	ion_phys_addr_t phys_addr;
+	size_t alloc_val;
 
 	fw_rpc_ion_client = ion_client_create(rtk_phoenix_ion_device,
 						"FW_REMOTE_ALLOC");
@@ -689,8 +745,13 @@ int rpc_intr_init(void)
 			}
 		}
 	}
-	init_waitqueue_head(&r_program_waitQueue);
-	r_program_kthread = kthread_run(remote_alloc_thread, (void *)&j, "r_program");
+	init_waitqueue_head(&acpu_r_program_waitQueue);
+	acpu_r_program_kthread = kthread_run(acpu_remote_alloc_thread, (void *)&j, "acpu_r_program");
+
+#ifdef CONFIG_ARCH_RTD13xx
+	init_waitqueue_head(&vcpu_r_program_waitQueue);
+	vcpu_r_program_kthread = kthread_run(vcpu_remote_alloc_thread, (void *)&j, "vcpu_r_program");
+#endif
 	is_init = 1;
 	rpc_intr_is_paused = 0;
 	rpc_intr_is_suspend = 0;
@@ -746,7 +807,7 @@ int rpc_intr_open(struct inode *inode, struct file *filp)
 	pr_debug("RPC intr open with minor number: %d\n", minor);
 
 	if (!filp->private_data) {
-		RPC_PROCESS *proc = kmalloc(sizeof(RPC_PROCESS), GFP_KERNEL);
+		RPC_PROCESS *proc = kmalloc(sizeof(RPC_PROCESS), GFP_KERNEL | __GFP_ZERO);
 		if (proc == NULL) {
 			pr_err("%s: failed to allocate RPC_PROCESS", __func__);
 			return -ENOMEM;
@@ -756,6 +817,7 @@ int rpc_intr_open(struct inode *inode, struct file *filp)
 		proc->extra = &rpc_intr_extra[minor / RPC_NR_PAIR];
 		/* current->tgid = process id, current->pid = thread id */
 		proc->pid = current->tgid;
+        proc->bStayActive = false;
 		init_waitqueue_head(&proc->waitQueue);
 		INIT_LIST_HEAD(&proc->threads);
 #ifdef CONFIG_REALTEK_RPC_PROGRAM_REGISTER
@@ -808,10 +870,19 @@ int rpc_intr_release(struct inode *inode, struct file *filp)
 	}
 
 #ifdef CONFIG_SND_REALTEK
-	if (rpc_intr_is_paused)
-		pr_err("rpc is paused, no self destroy: %s\n", current->comm);
-	else
-		RPC_DESTROY_AUDIO_FLOW(current->tgid);
+    do {
+        if (rpc_intr_is_paused) {
+            pr_err("rpc is paused, no self destroy: %s\n", current->comm);
+            break;
+        }
+        if (proc->bStayActive) {
+            pr_err("bStayActive is true, no self destroy: %s\n", current->comm);
+            break;
+        }
+        pr_info("self destroy: %s\n", current->comm);
+        RPC_DESTROY_AUDIO_FLOW(current->tgid);
+        break;
+    } while (0);
 #endif /* CONFIG_SND_REALTEK */
 
 	spin_lock_bh(&extra->lock);
@@ -997,23 +1068,6 @@ wait_again:
 	if (need_dispatch(extra))
 		tasklet_schedule(&(extra->tasklet));
 
-#if 0
-	if (count == sizeof(RPC_STRUCT) && access_ok(VERIFY_WRITE, buf, sizeof(RPC_STRUCT))) {
-		RPC_STRUCT *rpc = (RPC_STRUCT *)buf;
-		uint32_t programID = ntohl(rpc->programID);
-
-		if (programID == R_PROGRAM) {
-			rpc->versionID = htonl(0);
-		} else if (programID == REPLYID) {
-			rpc->versionID = htonl(REPLYID);
-		} else if (programID == AUDIO_AGENT) {
-			rpc->versionID = htonl(0);
-		} else {
-			pr_warn("%s: invalid programID:%u\n", __func__, programID);
-		}
-	}
-#endif
-
 	pr_debug("%s:%d pid:%d tgid:%d count:%lu actual:%ld ringOut:%x "
 			"ringIn:%x nextRpc:%x currProc:%p(%d)\n",
 			extra->name, __LINE__, current->pid, current->tgid, count, ret,
@@ -1169,14 +1223,10 @@ ssize_t rpc_intr_write(struct file *filp, const char *buf, size_t count,
 	/* use the "f_pos" of file object to store the device number */
 	temp = (int) *f_pos;
 		//if (temp == 1)
-	if (temp == 1 || temp == 5) {
-#if 1
-		rpc_send_interrupt();
-#else
-		/* audio */
-		writel((RPC_INT_SA | RPC_INT_WRITE_1), rpc_int_base+RPC_SB2_INT);
-#endif
-	//rtd_outl(REG_SB2_CPU_INT, (RPC_INT_SA | RPC_INT_WRITE_1));
+	if (temp == 1) {
+		rpc_send_interrupt(RPC_AUDIO);
+	} else if (temp == 5) {
+		rpc_send_interrupt(RPC_VIDEO);
 	} else {
 		pr_err("error device number...");
 	}
@@ -1244,6 +1294,21 @@ long rpc_intr_ioctl(struct file *filp, unsigned int cmd,
 			break;
 		}
 #endif /* CONFIG_REALTEK_RPC_PROGRAM_REGISTER */
+        case RPC_IOC_PROCESS_CONFIG_0:
+                              {
+                                  RPC_PROCESS *proc = filp->private_data;
+                                  struct S_RPC_IOC_PROCESS_CONFIG_0 config;
+                                  if (copy_from_user(&config, (void __user *)arg, sizeof(struct S_RPC_IOC_PROCESS_CONFIG_0))) {
+                                      pr_err("ERROR! %s cmd:RPC_IOC_PROCESS_CONFIG_0 copy_from_user failed\n", __func__);
+                                      return -ENOMEM;
+                                  }
+                                  if (proc == NULL) {
+                                      pr_err("ERROR! %s cmd:RPC_IOC_PROCESS_CONFIG_0 proc:%p\n", __func__, proc);
+                                      return -ENOMEM;
+                                  }
+                                  proc->bStayActive = (config.bStayActive > 0) ? true : false;
+                                  break;
+                              }
 		default: /* redundant, as cmd was checked against MAXNR */
 			pr_err("%s:%d unsupported ioctl cmd:%x arg:%lx", __func__,
 					__LINE__, cmd, arg);

@@ -9,8 +9,6 @@
  * published by the Free Software Foundation.
  */
 
-#define pr_fmt(fmt) "rtk-clk: " fmt
-
 #include <linux/clk.h>
 #include <linux/clkdev.h>
 #include <linux/clk-provider.h>
@@ -19,8 +17,10 @@
 #include "clk-pll.h"
 #include "clk-mmio-gate.h"
 #include "clk-mmio-mux.h"
+#include "clk_regmap.h"
 #include <dt-bindings/clock/rtk,clock-rtd16xx.h>
 
+#define DEFAULT_PARENT_OSC27M    (const char *[]){ "osc27M" }
 static DEFINE_SPINLOCK(clk_div_lock);
 
 #define _D(_rate, _div, _val) \
@@ -44,22 +44,10 @@ static DEFINE_SPINLOCK(clk_div_lock);
 	.val = ((_m) << 4) | ((_n) << 12) | ((_o) << 17), \
 }
 
-#define SCPU_FREQ_SEL1  0x0
-#define SCPU_FREQ_SEL7  0x80
-
-#define SCPU_FREQ_DIV1   (0)
-#define SCPU_FREQ_DIV2   ((2 << 2) | SCPU_FREQ_SEL7)
-#define SCPU_FREQ_DIV4   ((4 << 2) | SCPU_FREQ_SEL7)
-#define SCPU_FREQ_DIV3   ((3 << 2) | SCPU_FREQ_SEL7)
-#define SCPU_FREQ_DIV5   ((5 << 2) | SCPU_FREQ_SEL7)
-#define SCPU_FREQ_DIV6   ((6 << 2) | SCPU_FREQ_SEL7)
-#define SCPU_FREQ_DIV7   ((7 << 2) | SCPU_FREQ_SEL7)
-#define SCPU_FREQ_DIV8   ((8 << 2) | SCPU_FREQ_SEL7)
-#define SCPU_FREQ_DIV10  ((10 << 2) | SCPU_FREQ_SEL7)
-#define SCPU_FREQ_DIV13  ((13 << 2) | SCPU_FREQ_SEL7)
-
-#define SCPU_FREQ_DUMMY0  (0)
-#define SCPU_FREQ_DUMMY1  (0 | SCPU_FREQ_SEL7)
+#define CLK_PLL_TYPE_SSC                (CLK_PLL_CONF_FREQ_LOC_SSC1)
+#define CLK_PLL_TYPE_SSC_POW0           (CLK_PLL_CONF_FREQ_LOC_SSC1 | CLK_PLL_CONF_POW_LOC_CTL2)
+#define CLK_PLL_TYPE_SSC_POW1           (CLK_PLL_CONF_FREQ_LOC_SSC1 | CLK_PLL_CONF_POW_LOC_CTL3)
+#define CLK_PLL_TYPE_POW                (CLK_PLL_CONF_FREQ_LOC_CTL1 | CLK_PLL_CONF_POW_LOC_CTL2)
 
 static const struct div_table scpu_div_tbl[] = {
 	_D(1000000000,  1, SCPU_FREQ_DIV1),
@@ -67,9 +55,6 @@ static const struct div_table scpu_div_tbl[] = {
 	_D(250000000,   4, SCPU_FREQ_DIV4),
 	_D(200000000,   8, SCPU_FREQ_DIV8),
 	_D(100000000,  10, SCPU_FREQ_DIV10),
-	/* special cases, only for mapping val and div */
-	_D(-1,  1, SCPU_FREQ_DUMMY0),
-	_D(-1,  3, SCPU_FREQ_DUMMY1),
 	DIV_TABLE_END
 };
 
@@ -81,50 +66,45 @@ static const struct freq_table scpu_tbl[] = {
 	_NF(1400000000, 48, 1745),
 	_NF(1500000000, 52, 1137),
 	_NF(1600000000, 56,  530),
+	_NF(1700000000, 59, 1972),
 	_NF(1800000000, 63, 1365),
+	_NF(1900000000, 67,  758),
+	_NF(2000000000, 71,  151),
 	/* init-value mapping */
 	_NF(1000000000, 35,    0),
 	_NF(1200000000, 41,    0),
 	_NF(1800000000, 65,    0),
 	_NF(1800000000, 64,    0),
-	/* special cases */
-	_NF(1400000001, 45,  301),
-	_NF(1500000001, 45,  302),
 	FREQ_TABLE_END
 };
 
 static struct clk_pll_div pll_scpu = {
-	.div_offset = 0x30,
-	.div_shift  = 6,
-	.div_width  = 8,
-	.div_tbl = scpu_div_tbl,
-	.lock = &clk_div_lock,
-	.clkp = {
-		.flags = CLK_PLL_LSM_STEP_HIGH,
-		.ssc_offset = 0x500,
-		.pll_offset = 0x504,
-		.rdy_offset = 0x51c,
-		.pow_offset = CLK_OFFSET_INVALID,
-		.freq_tbl = scpu_tbl,
+	.div_offset = PLL_DIV,
+	.div_shift  = SCPU_FREQ_SEL_SHIFT,
+	.div_width  = SCPU_FREQ_SEL_WIDTH,
+	.div_tbl    = scpu_div_tbl,
+	.lock       = &clk_div_lock,
+	.clkp       = {
+		.conf         = CLK_PLL_TYPE_SSC,
+		.flags        = CLK_PLL_LSM_STEP_HIGH,
+		.ssc_offset   = PLL_SSC_DIG_SCPU0,
+		.pll_offset   = CLK_OFFSET_INVALID,
+		.freq_tbl     = scpu_tbl,
 		.base.hw.init = &(struct clk_init_data) {
-			.name = "pll_scpu",
-			.ops = &clk_pll_div_ops,
-			.parent_names = (const char *[]){ "osc27M" },
-			.num_parents = 1,
-			.flags = CLK_IGNORE_UNUSED | CLK_GET_RATE_NOCACHE,
+			.name         = "pll_scpu",
+			.ops          = &clk_pll_div_ops,
+			.parent_names = DEFAULT_PARENT_OSC27M,
+			.num_parents  = 1,
+			.flags        = CLK_IGNORE_UNUSED |
+					CLK_GET_RATE_NOCACHE,
 		},
 	},
 };
-
-#define BUS_FREQ_DIV1  1
-#define BUS_FREQ_DIV2  2
-#define BUS_FREQ_DIV4  3
 
 static const struct div_table bus_div_tbl[] = {
 	_D(257000000,  1, BUS_FREQ_DIV1),
 	_D(129000000,  2, BUS_FREQ_DIV2),
 	_D(65000000,   4, BUS_FREQ_DIV4),
-	_D(-1,  1, 0),
 	DIV_TABLE_END
 };
 
@@ -136,52 +116,49 @@ static const struct freq_table bus_tbl[] = {
 };
 
 static struct clk_pll_div pll_bus = {
-	.div_offset = 0x30,
-	.div_shift  = 0,
-	.div_width  = 2,
-	.div_tbl = bus_div_tbl,
-	.lock = &clk_div_lock,
-	.clkp = {
-		.ssc_offset = 0x520,
-		.pll_offset = 0x524,
-		.rdy_offset = 0x53c,
-		.pow_offset = CLK_OFFSET_INVALID,
-		.freq_tbl = bus_tbl,
+	.div_offset = PLL_DIV,
+	.div_shift  = BUS_FREQ_SEL_SHIFT,
+	.div_width  = BUS_FREQ_SEL_WIDTH,
+	.div_tbl    = bus_div_tbl,
+	.lock       = &clk_div_lock,
+	.clkp       = {
+		.conf         = CLK_PLL_TYPE_SSC,
+		.ssc_offset   = PLL_SSC_DIG_BUS0,
+		.pll_offset   = CLK_OFFSET_INVALID,
+		.freq_tbl     = bus_tbl,
 		.base.hw.init = &(struct clk_init_data) {
-			.name = "pll_bus",
-			.ops = &clk_pll_div_ops,
-			.parent_names = (const char *[]){ "osc27M" },
-			.num_parents = 1,
-			.flags = CLK_IGNORE_UNUSED | CLK_GET_RATE_NOCACHE,
+			.name         = "pll_bus",
+			.ops          = &clk_pll_div_ops,
+			.parent_names = DEFAULT_PARENT_OSC27M,
+			.num_parents  = 1,
+			.flags        = CLK_IGNORE_UNUSED |
+					CLK_GET_RATE_NOCACHE,
 		},
 	},
 };
 
 static struct clk_fixed_factor clk_sys = {
-	.div = 1,
-	.mult = 1,
+	.div     = 1,
+	.mult    = 1,
 	.hw.init = &(struct clk_init_data) {
-		.name = "clk_sys",
-		.ops = &clk_fixed_factor_ops,
+		.name         = "clk_sys",
+		.ops          = &clk_fixed_factor_ops,
 		.parent_names = (const char *[]){ "pll_bus" },
-		.num_parents = 1,
-		.flags = CLK_SET_RATE_PARENT,
+		.num_parents  = 1,
+		.flags        = CLK_SET_RATE_PARENT,
 	},
 };
 
 static struct clk_mmio_mux clk_sys_sb2 = {
-	.mux_offset = 0x18,
-	.mask = BIT(1) - 1,
-	.shift = 0,
+	.mux_offset   = GROUP1_CK_SEL,
+	.mask         = BIT(1) - 1,
+	.shift        = 0,
 	.base.hw.init = &(struct clk_init_data) {
-		.name = "clk_sys_sb2",
-		.ops = &clk_mmio_mux_ops,
-		.parent_names = (const char *[]){
-			"clk_sys",
-			"osc27M",
-		},
-		.num_parents = 2,
-		.flags = 0,
+		.name         = "clk_sys_sb2",
+		.ops          = &clk_mmio_mux_ops,
+		.parent_names = (const char *[]){ "clk_sys", "osc27M", },
+		.num_parents  = 2,
+		.flags        = 0,
 	},
 };
 
@@ -210,15 +187,10 @@ static struct notifier_block clk_sys_sb2_nb = {
 	.notifier_call = clk_sys_sb2_notifier,
 };
 
-#define DCSB_FREQ_DIV1  1
-#define DCSB_FREQ_DIV2  2
-#define DCSB_FREQ_DIV4  3
-
 static const struct div_table dcsb_div_tbl[] = {
 	_D(550000000, 1, DCSB_FREQ_DIV1),
 	_D(275000000, 2, DCSB_FREQ_DIV2),
 	_D(1,         4, DCSB_FREQ_DIV4),
-	_D(1,         1, 0),
 	DIV_TABLE_END
 };
 
@@ -230,36 +202,36 @@ static const struct freq_table dcsb_tbl[] = {
 };
 
 static struct clk_pll_div pll_dcsb = {
-	.div_offset = 0x30,
-	.div_shift  = 2,
-	.div_width  = 2,
-	.div_tbl = dcsb_div_tbl,
-	.lock = &clk_div_lock,
-	.clkp = {
-		.ssc_offset = 0x540,
-		.pll_offset = 0x544,
-		.rdy_offset = 0x55c,
-		.pow_offset = CLK_OFFSET_INVALID,
-		.freq_tbl = dcsb_tbl,
+	.div_offset = PLL_DIV,
+	.div_shift  = DCSB_FREQ_SEL_SHIFT,
+	.div_width  = DCSB_FREQ_SEL_WIDTH,
+	.div_tbl    = dcsb_div_tbl,
+	.lock       = &clk_div_lock,
+	.clkp       = {
+		.conf         = CLK_PLL_TYPE_SSC,
+		.ssc_offset   = PLL_SSC_DIG_DCSB0,
+		.pll_offset   = CLK_OFFSET_INVALID,
+		.freq_tbl     = dcsb_tbl,
 		.base.hw.init = &(struct clk_init_data) {
-			.name = "pll_dcsb",
-			.ops = &clk_pll_div_ops,
-			.parent_names = (const char *[]){ "osc27M" },
-			.num_parents = 1,
-			.flags = CLK_IGNORE_UNUSED | CLK_GET_RATE_NOCACHE,
+			.name         = "pll_dcsb",
+			.ops          = &clk_pll_div_ops,
+			.parent_names = DEFAULT_PARENT_OSC27M,
+			.num_parents  = 1,
+			.flags        = CLK_IGNORE_UNUSED |
+					CLK_GET_RATE_NOCACHE,
 		},
 	},
 };
 
 static struct clk_fixed_factor clk_sysh = {
-	.div = 1,
-	.mult = 1,
+	.div     = 1,
+	.mult    = 1,
 	.hw.init = &(struct clk_init_data) {
-		.name = "clk_sysh",
-		.ops = &clk_fixed_factor_ops,
+		.name         = "clk_sysh",
+		.ops          = &clk_fixed_factor_ops,
 		.parent_names = (const char *[]){ "pll_dcsb" },
-		.num_parents = 1,
-		.flags = CLK_SET_RATE_PARENT,
+		.num_parents  = 1,
+		.flags        = CLK_SET_RATE_PARENT,
 	},
 };
 
@@ -269,17 +241,16 @@ static const struct freq_table ddsx_tbl[] = {
 };
 
 static struct clk_pll pll_ddsa = {
-	.ssc_offset = 0x560,
-	.pll_offset = 0x564,
-	.rdy_offset = 0x57c,
-	.pow_offset = 0x128,
-	.freq_tbl = ddsx_tbl,
+	.conf         = CLK_PLL_TYPE_SSC_POW1,
+	.ssc_offset   = PLL_SSC_DIG_DDSA0,
+	.pll_offset   = PLL_DDSA1,
+	.freq_tbl     = ddsx_tbl,
 	.base.hw.init = &(struct clk_init_data) {
-		.name = "pll_ddsa",
-		.ops = &clk_pll_ops,
-		.parent_names = (const char *[]){ "osc27M" },
-		.num_parents = 1,
-		.flags = CLK_IGNORE_UNUSED | CLK_GET_RATE_NOCACHE,
+		.name         = "pll_ddsa",
+		.ops          = &clk_pll_ops,
+		.parent_names = DEFAULT_PARENT_OSC27M,
+		.num_parents  = 1,
+		.flags        = CLK_IGNORE_UNUSED | CLK_GET_RATE_NOCACHE,
 	},
 };
 
@@ -297,29 +268,28 @@ static const struct freq_table gpu_tbl[] = {
 };
 
 static struct clk_pll pll_gpu = {
-	.ssc_offset = 0x5a0,
-	.pll_offset = 0x5a4,
-	.rdy_offset = 0x5bc,
-	.pow_offset = 0x1c4,
-	.freq_tbl = gpu_tbl,
+	.conf         = CLK_PLL_TYPE_SSC_POW0,
+	.ssc_offset   = PLL_SSC_DIG_GPU0,
+	.pll_offset   = PLL_GPU1,
+	.freq_tbl     = gpu_tbl,
 	.base.hw.init = &(struct clk_init_data) {
-		.name = "pll_gpu",
-		.ops = &clk_pll_ops,
-		.parent_names = (const char *[]){ "osc27M" },
-		.num_parents = 1,
-		.flags = CLK_GET_RATE_NOCACHE | CLK_SET_RATE_UNGATE,
+		.name         = "pll_gpu",
+		.ops          = &clk_pll_ops,
+		.parent_names = DEFAULT_PARENT_OSC27M,
+		.num_parents  = 1,
+		.flags        = CLK_GET_RATE_NOCACHE,
 	},
 };
 
 static struct clk_composite_init_data clk_gpu_init = {
-	.mux_offset = CLK_OFFSET_INVALID,
-	.gate_offset = 0x50,
-	.gate_shift = 18,
-	.gate_flags = CLK_MMIO_GATE_HAS_WRITE_EN,
-	.parent_names =  (const char *[]){ "pll_gpu" },
-	.num_parents = 1,
-	.name = "clk_gpu",
-	.flags = CLK_SET_RATE_PARENT | CLK_IGNORE_UNUSED,
+	.mux_offset   = CLK_OFFSET_INVALID,
+	.gate_offset  = CLOCK_ENABLE1,
+	.gate_shift   = CLK_EN_GPU,
+	.gate_flags   = CLK_MMIO_GATE_HAS_WRITE_EN,
+	.parent_names = (const char *[]){ "pll_gpu" },
+	.num_parents  = 1,
+	.name         = "clk_gpu",
+	.flags        = CLK_SET_RATE_PARENT,
 };
 
 static struct freq_table ve_tbl[] = {
@@ -331,7 +301,7 @@ static struct freq_table ve_tbl[] = {
 	_MNO(486000000, 16, 0, 0),
 	_MNO(513000000, 17, 0, 0),
 	_MNO(540000000, 18, 0, 0),
-	_MNO(550000000, 59, 2, 0), // = (59+2) * 27/3
+	_MNO(550000000, 59, 2, 0),
 	_MNO(567000000, 19, 0, 0),
 	_MNO(594000000, 20, 0, 0),
 	_MNO(648000000, 22, 0, 0),
@@ -342,107 +312,114 @@ static struct freq_table ve_tbl[] = {
 };
 
 static struct clk_pll pll_ve1 = {
-	.ssc_offset = CLK_OFFSET_INVALID,
-	.pll_offset = 0x114,
-	.rdy_offset = CLK_OFFSET_INVALID,
-	.pow_offset = 0x118,
-	.freq_tbl = ve_tbl,
+	.conf         = CLK_PLL_TYPE_POW,
+	.ssc_offset   = CLK_OFFSET_INVALID,
+	.pll_offset   = PLL_VE1_1,
+	.freq_tbl     = ve_tbl,
 	.base.hw.init = &(struct clk_init_data) {
-		.name = "pll_ve1",
-		.ops = &clk_pll_ops,
-		.parent_names = (const char *[]){ "osc27M" },
-		.num_parents = 1,
-		.flags = CLK_GET_RATE_NOCACHE,
+		.name         = "pll_ve1",
+		.ops          = &clk_pll_ops,
+		.parent_names = DEFAULT_PARENT_OSC27M,
+		.num_parents  = 1,
+		.flags        = CLK_GET_RATE_NOCACHE,
 	},
 };
 
 static struct clk_pll pll_ve2 = {
-	.ssc_offset = CLK_OFFSET_INVALID,
-	.pll_offset = 0x1d0,
-	.rdy_offset = CLK_OFFSET_INVALID,
-	.pow_offset = 0x1d4,
-	.freq_tbl = ve_tbl,
+	.conf         = CLK_PLL_TYPE_POW,
+	.ssc_offset   = CLK_OFFSET_INVALID,
+	.pll_offset   = PLL_VE2_1,
+	.freq_tbl     = ve_tbl,
 	.base.hw.init = &(struct clk_init_data) {
-		.name = "pll_ve2",
-		.ops = &clk_pll_ops,
-		.parent_names = (const char *[]){ "osc27M" },
-		.num_parents = 1,
-		.flags = CLK_GET_RATE_NOCACHE,
+		.name         = "pll_ve2",
+		.ops          = &clk_pll_ops,
+		.parent_names = DEFAULT_PARENT_OSC27M,
+		.num_parents  = 1,
+		.flags        = CLK_GET_RATE_NOCACHE,
 	},
 };
 
 static struct clk_composite_init_data clk_ve1_init = {
-	.mux_offset = 0x4c,
-	.mux_width = 3,
-	.mux_shift = 0,
-	.gate_offset = 0x50,
-	.gate_shift = 20,
-	.gate_flags = CLK_MMIO_GATE_HAS_WRITE_EN,
-	.parent_names =  (const char *[]){
+	.mux_offset   = VE_CKSEL,
+	.mux_width    = CLK_VE1_SEL_WIDTH,
+	.mux_shift    = CLK_VE1_SEL_SHIFT,
+	.gate_offset  = CLOCK_ENABLE1,
+	.gate_shift   = CLK_EN_VE1,
+	.gate_flags   = CLK_MMIO_GATE_HAS_WRITE_EN,
+	.parent_names = (const char *[]){
 		"clk_sys",
 		"clk_sysh",
 		"pll_ve1",
 		"pll_ve2",
 	},
-	.num_parents = 4,
-	.name = "clk_ve1",
-	.flags = CLK_IGNORE_UNUSED | CLK_SET_RATE_PARENT |
-		CLK_SET_RATE_NO_REPARENT,
+	.num_parents  = 4,
+	.name         = "clk_ve1",
+	.flags        = CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
 };
 
 static struct clk_composite_init_data clk_ve2_init = {
-	.mux_offset = 0x4c,
-	.mux_width = 3,
-	.mux_shift = 3,
-	.gate_offset = 0x50,
-	.gate_shift = 22,
-	.gate_flags = CLK_MMIO_GATE_HAS_WRITE_EN,
-	.parent_names =  (const char *[]){
+	.mux_offset   = VE_CKSEL,
+	.mux_width    = CLK_VE2_SEL_WIDTH,
+	.mux_shift    = CLK_VE2_SEL_SHIFT,
+	.gate_offset  = CLOCK_ENABLE1,
+	.gate_shift   = CLK_EN_VE2,
+	.gate_flags   = CLK_MMIO_GATE_HAS_WRITE_EN,
+	.parent_names = (const char *[]){
 		"clk_sys",
 		"clk_sysh",
 		"pll_ve1",
 		"pll_ve2",
 	},
-	.num_parents = 4,
-	.name = "clk_ve2",
-	.flags = CLK_IGNORE_UNUSED | CLK_SET_RATE_PARENT |
-		CLK_SET_RATE_NO_REPARENT,
+	.num_parents  = 4,
+	.name         = "clk_ve2",
+	.flags        = CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
 };
 
 static struct clk_composite_init_data clk_ve3_init = {
-	.mux_offset = 0x4c,
-	.mux_width = 3,
-	.mux_shift = 6,
-	.gate_offset = 0x5c,
-	.gate_shift = 26,
-	.gate_flags = CLK_MMIO_GATE_HAS_WRITE_EN,
-	.parent_names =  (const char *[]){
+	.mux_offset   = VE_CKSEL,
+	.mux_width    = CLK_VE3_SEL_WIDTH,
+	.mux_shift    = CLK_VE3_SEL_SHIFT,
+	.gate_offset  = CLOCK_ENABLE4,
+	.gate_shift   = CLK_EN_VE3,
+	.gate_flags   = CLK_MMIO_GATE_HAS_WRITE_EN,
+	.parent_names = (const char *[]){
 		"clk_sys",
 		"clk_sysh",
 		"pll_ve1",
 		"pll_ve2",
 	},
-	.num_parents = 4,
-	.name = "clk_ve3",
-	.flags = CLK_IGNORE_UNUSED | CLK_SET_RATE_PARENT |
-		CLK_SET_RATE_NO_REPARENT,
+	.num_parents  = 4,
+	.name         = "clk_ve3",
+	.flags        = CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
 };
 
 static struct clk_composite_init_data clk_ve2_bpu_init = {
-	.mux_offset = 0x4c,
-	.mux_width = 3,
-	.mux_shift = 9,
-	.gate_offset = CLK_OFFSET_INVALID,
-	.parent_names =  (const char *[]){
+	.mux_offset   = VE_CKSEL,
+	.mux_width    = CLK_VE2_BPU_SEL_WIDTH,
+	.mux_shift    = CLK_VE2_BPU_SEL_SHIFT,
+	.gate_offset  = CLK_OFFSET_INVALID,
+	.parent_names = (const char *[]){
 		"clk_sys",
 		"clk_sysh",
 		"pll_ve1",
 		"pll_ve2",
 	},
-	.num_parents = 4,
-	.name = "clk_ve2_bpu",
-	.flags = CLK_IGNORE_UNUSED | CLK_SET_RATE_PARENT |
-		CLK_SET_RATE_NO_REPARENT,
+	.num_parents  = 4,
+	.name         = "clk_ve2_bpu",
+	.flags        = CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
+};
+
+static struct clk_pll pll_dif = {
+	.ssc_offset   = PLL_SSC_DIG_PLLDIF0,
+	.pll_offset   = PLL_DIF1,
+	.freq_tbl     = NULL,
+	.base.hw.init = &(struct clk_init_data) {
+		.name         = "pll_dif",
+		.ops          = &clk_pll_dif_ops,
+		.parent_names = DEFAULT_PARENT_OSC27M,
+		.num_parents  = 1,
+		.flags        = CLK_GET_RATE_NOCACHE,
+	},
 };
 
 static struct clk_hw *clk_reg_list[] = {
@@ -453,6 +430,7 @@ static struct clk_hw *clk_reg_list[] = {
 	[CC_PLL_GPU]     = &__clk_pll_hw(&pll_gpu),
 	[CC_PLL_VE1]     = &__clk_pll_hw(&pll_ve1),
 	[CC_PLL_VE2]     = &__clk_pll_hw(&pll_ve2),
+	[CC_PLL_DIF]     = &__clk_pll_hw(&pll_dif),
 	[CC_CLK_SYS_SB2] = &__clk_mmio_mux_hw(&clk_sys_sb2),
 	[CC_CLK_SYS]     = &clk_sys.hw,
 	[CC_CLK_SYSH]    = &clk_sysh.hw,

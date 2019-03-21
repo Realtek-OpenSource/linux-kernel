@@ -32,6 +32,7 @@ static int hse_runtime_suspend(struct device *dev)
 	for (i = 0; i < HSE_MAX_ENGINES; i++)
 		hse_engine_suspend(hdev->engs[i]);
 	clk_disable_unprepare(hdev->clk);
+	reset_control_assert(hdev->rstc);
 
 	return 0;
 }
@@ -42,6 +43,7 @@ static int hse_runtime_resume(struct device *dev)
 	int i;
 
 	dev_dbg(dev, "%s\n", __func__);
+	reset_control_deassert(hdev->rstc);
 	clk_prepare_enable(hdev->clk);
 	for (i = 0; i < HSE_MAX_ENGINES; i++)
 		hse_engine_resume(hdev->engs[i]);
@@ -102,8 +104,6 @@ static int hse_probe(struct platform_device *pdev)
 	int ret;
 	int i;
 	int requested_irq_num = 0;
-
-	dev_info(dev, "%s\n", __func__);
 
 	hdev = devm_kzalloc(dev, sizeof(*hdev), GFP_KERNEL);
 	if (!hdev)
@@ -186,8 +186,6 @@ static int hse_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	reset_control_deassert(hdev->rstc);
-
 	pm_runtime_set_suspended(dev);
 	pm_runtime_enable(dev);
 
@@ -202,6 +200,7 @@ static int hse_probe(struct platform_device *pdev)
 			i, ret);
 	}
 	pm_runtime_put_sync(dev);
+	dev_info(dev, "initialized\n");
 
 	hse_self_test(hdev);
 	return 0;
@@ -213,6 +212,7 @@ static int hse_remove(struct platform_device *pdev)
 
 	pm_runtime_disable(hdev->dev);
 	reset_control_assert(hdev->rstc);
+	dev_info(&pdev->dev, "removed\n");
 	return 0;
 }
 
@@ -229,6 +229,7 @@ static struct platform_driver hse_driver = {
 		.owner          = THIS_MODULE,
 		.of_match_table = hse_ids,
 		.pm             = &hse_pm_ops,
+		.probe_type     = PROBE_PREFER_ASYNCHRONOUS,
 	},
 };
 module_platform_driver(hse_driver);

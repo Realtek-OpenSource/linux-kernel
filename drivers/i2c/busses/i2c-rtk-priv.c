@@ -22,37 +22,24 @@
 #include <linux/i2c.h>
 #include <linux/io.h>
 #include <linux/delay.h>
+#include <linux/arm-smccc.h>
 #include <asm/irq.h>
 
 #include "i2c-rtk-priv.h"
 
-#ifdef CONFIG_ARCH_RTD16xx
+#ifdef CONFIG_I2C_RTK_SECURE_ACCESS
+extern bool secure_dvfs_is_disabled(void);
+
 static void swc_write(unsigned int address, unsigned int value)
 {
-	unsigned int tmp;
-	unsigned int cmd;
-#if defined(CONFIG_CPU_V7)
-	asm volatile("mov r1, %0" : :"r" (value): "cc");
-	asm volatile(".arch_extension sec" : : : "cc");
-	cmd = 0x8400ff0a;
-	asm volatile("mov r0, %0" : :"r" (cmd): "cc");
-	asm volatile("isb" : : : "cc");
-	asm volatile("smc #0" : : : "cc");
-	asm volatile("isb" : : : "cc");
-	asm volatile("mov %0, r0" : "=r" (tmp): : "cc");
-#else
-	asm volatile("mov x1, %0" : :"r"(value): "cc");
-	asm volatile("ldr x0, =0x8400ff0a" : : : "cc");
-	asm volatile("isb" : : : "cc");
-	asm volatile("smc #0" : : : "cc");
-	asm volatile("isb" : : : "cc");
-	asm volatile("mov %0, x0" : "=r"(tmp): : "cc");
-#endif
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(0x8400ff0a, value, 0, 0, 0, 0, 0, 0, &res);
 }
 
 void SET_IC_ENABLE(struct rtk_i2c_handler *handler, int value)
 {
-	if (handler->id == 0)
+	if (handler->id == 0 && !secure_dvfs_is_disabled())
 		swc_write(handler->reg_map.IC_ENABLE, value);
 	else
 		wr_reg(handler->reg_map.IC_ENABLE, value);
@@ -91,7 +78,7 @@ int rtk_i2c_handler_init(struct rtk_i2c_handler *handler)
 		((GET_IC_COMP_PARAM_1(handler) >> 16) & 0xFF) + 1;
 	init_waitqueue_head(&handler->wq);
 
-	/*spin_lock_init(&handler->lock);*/
+	spin_lock_init(&handler->lock);
 
 	return rtk_i2c_phy_init(handler);
 }

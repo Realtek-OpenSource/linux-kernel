@@ -119,6 +119,11 @@ long compat_hdmitx_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case HDMI_SET_VO_INTERFACE_TYPE:
 		ret_value = file->f_op->unlocked_ioctl(file, cmd, arg);
 		break;
+
+	case HDMI_GET_CONFIG_TV_SYSTEM:
+		ret_value = file->f_op->unlocked_ioctl(file, cmd, arg);
+		break;
+
 	default:
 		ret_value = -EFAULT;
 	}
@@ -245,6 +250,10 @@ long compat_hdmitx_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 						(unsigned long)compat_ptr(arg));
 		break;
 	case HDMI_SET_VO_INTERFACE_TYPE:
+		ret_value = file->f_op->unlocked_ioctl(file, cmd,
+						(unsigned long)compat_ptr(arg));
+		break;
+	case HDMI_GET_CONFIG_TV_SYSTEM:
 		ret_value = file->f_op->unlocked_ioctl(file, cmd,
 						(unsigned long)compat_ptr(arg));
 		break;

@@ -17,6 +17,7 @@
 #include <linux/reset-controller.h>
 #include <linux/slab.h>
 #include <linux/suspend.h>
+#include <soc/realtek/rtk_chip.h>
 
 #define MAX_RESET_MUX_NUM     2
 
@@ -53,8 +54,9 @@ static struct mux_entry rtd16xx_entries[] = {
 
 static u32 rtd16xx_eval_mux(struct controller_data *data)
 {
-	// TODO
-	return 0;
+	if (get_rtd_chip_revision() == RTD_CHIP_A00)
+		return 0;
+	return 1;
 }
 
 static struct controller_data rtd16xx_mux_controller = {
@@ -166,8 +168,6 @@ static int reset_mux_probe(struct platform_device *pdev)
 	const struct of_device_id *id;
 	int ret;
 
-	dev_info(dev, "%s\n", __func__);
-
 	id = of_match_node(reset_mux_match, np);
 	if (!id)
 		return -EINVAL;
@@ -184,7 +184,7 @@ static int reset_mux_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 	platform_set_drvdata(pdev, data);
-
+	dev_info(dev, "initialized\n");
 	return 0;
 }
 
@@ -202,5 +202,4 @@ static int __init reset_mux_init(void)
 	return platform_driver_register(&reset_mux_driver);
 }
 core_initcall(reset_mux_init);
-
 

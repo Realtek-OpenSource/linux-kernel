@@ -254,6 +254,7 @@ static int g2227_regulator_probe(struct i2c_client *client,
 	}
 
 	i2c_set_clientdata(client, gdev);
+	g22xx_setup_pm_power_off(gdev, G2227_REG_SYS_CONTROL, G2227_SOFTOFF_MASK);
 	return 0;
 }
 

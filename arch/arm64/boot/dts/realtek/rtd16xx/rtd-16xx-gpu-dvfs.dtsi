@@ -36,12 +36,12 @@
 		opp-3x600 {
 			opp-hz = /bits/ 64 <600000000>;
 			opp-hz-real = /bits/ 64 <600000000>;
-			opp-microvolt = <1050000>;
+			opp-microvolt = <1000000>;
 		};
 		opp-3x700 {
 			opp-hz = /bits/ 64 <700000000>;
 			opp-hz-real = /bits/ 64 <700000000>;
-			opp-microvolt = <1050000>;
+			opp-microvolt = <1000000>;
 		};
 	};
 };

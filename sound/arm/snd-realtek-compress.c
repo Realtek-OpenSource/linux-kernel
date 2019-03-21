@@ -1205,34 +1205,14 @@ static int directWriteData(rtk_runtime_stream_t *stream, void *data, int len)
 			}
 		}
 
-		/*	DHCHERC-219:
-			1. There has some noise when multi-video playing specific video.
-			2. The header is 16 bytes, so add the handler when remainingLen is less than 16.
-			3. Saving the parts of header and merge to next loop.
-	     */
-		if (delim_format == 1)
-		{
-			if (remainingLen > 0 && remainingLen < delim_header_size && hw_avsync_header_offset == 0)
-			{
-				memcpy(header_handle_buf2, header_buf, remainingLen);
-				header_handle_len = remainingLen;
-				header_handle_flag = 1;
-				return retLen;
-			}
-		}
-		else if (delim_format == 0)
-		{
-			if (remainingLen > 0 && remainingLen < 16 && hw_avsync_header_offset == 0)
-			{
-				memcpy(header_handle_buf1, header_buf, remainingLen);
-				header_handle_len = remainingLen;
-				header_handle_flag = 1;
-				return retLen;
-			}
-		}
-
         while(remainingLen > 0) {
-			
+
+			/* Copy the data for more than 1 header */
+			kfree(header_buf);
+			header_buf = kmalloc(sizeof(int) * remainingLen, GFP_KERNEL);
+			if(copy_from_user(header_buf, cBuf, remainingLen))
+				printk("%s %d copy data fail\n",__func__, __LINE__);
+
 			if (delim_format == 1)
 			{
 				if (header_handle_flag)
@@ -1263,6 +1243,33 @@ static int directWriteData(rtk_runtime_stream_t *stream, void *data, int len)
 			}
 
             if(bufHeader != NULL) {
+
+				/*	DHCHERC-219:
+					1. There has some noise when multi-video playing specific video.
+					2. The header is 16 bytes, so add the handler when remainingLen is less than 16.
+					3. Saving the parts of header and merge to next loop.
+				*/
+				if (delim_format == 1)
+				{
+					if (remainingLen > 0 && remainingLen < delim_header_size)
+					{
+						memcpy(header_handle_buf2, header_buf, remainingLen);
+						header_handle_len = remainingLen;
+						header_handle_flag = 1;
+						return retLen;
+					}
+				}
+				else if (delim_format == 0)
+				{
+					if (remainingLen > 0 && remainingLen < 16)
+					{
+						memcpy(header_handle_buf1, header_buf, remainingLen);
+						header_handle_len = remainingLen;
+						header_handle_flag = 1;
+						return retLen;
+					}
+				}
+
                 /* Write header */
                 memset(&cmd, 0, sizeof(cmd));
                 sizeInByte = ((int)bufHeader[7] | ((int)bufHeader[6] << 8) | ((int)bufHeader[5] << 16)| ((int)bufHeader[4] << 24));
@@ -1271,9 +1278,8 @@ static int directWriteData(rtk_runtime_stream_t *stream, void *data, int len)
                 cmd.PTSH = ((bufHeader[11] | ((0xff & bufHeader[10]) << 8) | ((0xff & bufHeader[9]) << 16) | ((0xff & bufHeader[8]) << 24)) & 0xffffffff);
                 cmd.PTSL = ((bufHeader[15] | ((0xff & bufHeader[14]) << 8) | ((0xff & bufHeader[13]) << 16) | ((0xff & bufHeader[12]) << 24)) & 0xffffffff);
                 cmd.wPtr = htonl(stream->phyDecInRing);
-                timestamp = (((int64_t)cmd.PTSH << 32) | ((int64_t)cmd.PTSL & 0xffffffff)) * 90000;
+                timestamp = (((int64_t)cmd.PTSH << 32) | ((int64_t)cmd.PTSL & 0xffffffff)) * 9;
 				timestamp = div64_ul(timestamp, 100000);
-				timestamp = div64_ul(timestamp, 10000);
                 cmd.PTSH = htonl((int32_t)(timestamp >> 32)& 0xffffffff);
                 cmd.PTSL = htonl((int32_t)(timestamp & 0xffffffffLL));
 				if (compress_first_pts) {
@@ -1287,7 +1293,7 @@ static int directWriteData(rtk_runtime_stream_t *stream, void *data, int len)
 				}
 
                 writeInbandCmd2(stream, &cmd, sizeof(cmd));
-				
+
 				/*	DHCHERC-486:
 					1. The position of header file may not at the first of data in some video.
 					2. The data before header file need to be send to buffer.
@@ -1296,7 +1302,7 @@ static int directWriteData(rtk_runtime_stream_t *stream, void *data, int len)
 				header_offset = (int)(uintptr_t)(bufHeader - header_buf);
 				if (header_offset > 0 && !header_handle_flag)
 					writeData(stream, cBuf, header_offset);
-				
+
 				if (delim_format == 1)
 				{
 					if (header_handle_flag)

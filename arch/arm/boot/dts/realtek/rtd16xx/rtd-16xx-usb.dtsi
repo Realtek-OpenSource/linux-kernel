@@ -152,7 +152,8 @@
 			usb-phy = <&dwc3_drd_usb2phy &dwc3_drd_usb3phy>;
 			dr_mode = "peripheral"; /*otg, host, peripheral*/
 			//tx-fifo-resize;
-			snps,dis_u2_susphy_quirk; // Add workaround for Usb3.0 hub suspend
+			//snps,dis_u2_susphy_quirk; // Add workaround for Usb3.0 hub suspend
+			snps,dis_u3_susphy_quirk; // DRD port is recommended disable suspend by specification
 			snps,dis_ss_park_mode; // disable usb3.0 park mode
 		};
 
@@ -170,30 +171,30 @@
 			A00 {
 				cc_dfp_mode = "dfp_3_0"; /*dfp_3_0, dfp_1_5, dfp_usb*/
 				rd_config = "internal"; /*internal, extrenal*/
-				cc1_rp_4p7k_code = <0x17>;
-				cc1_rp_36k_code = <0x15>;
-				cc1_rp_12k_code = <0xB>;
-				cc1_rd_code = <0x14>; /*for internal rd*/
+				cc1_rp_4p7k_code = <0xC>;
+				cc1_rp_36k_code = <0xF>;
+				cc1_rp_12k_code = <0xE>;
+				cc1_rd_code = <0x11>; /*for internal rd*/
 				cc1_vref_ufp = /bits/ 8
-					<0xC 0xB 0x0>; /*<1p23v,0p66v,0p2v>*/
+					<0x7 0xA 0x2>; /*<1p23v,0p66v,0p2v>*/
 				cc1_vref_dfp_usb = /bits/ 8
-					<0x2 0x0 0x0>; /*<0_1p6v,0p2v,unused>*/
+					<0x7 0x2 0x0>; /*<0_1p6v,0p2v,unused>*/
 				cc1_vref_dfp_1_5 = /bits/ 8
-					<0x8 0x5 0x0>; /*<1_1p6v,0p4v,0p2v>*/
+					<0x7 0x3 0x2>; /*<1_1p6v,0p4v,0p2v>*/
 				cc1_vref_dfp_3_0 = /bits/ 8
-					<0x0 0x7 0x0>; /*<2p6v,0p8v,0p2v>*/
-				cc2_rp_4p7k_code = <0x18>;
-				cc2_rp_36k_code = <0x15>;
-				cc2_rp_12k_code = <0xB>;
-				cc2_rd_code = <0x14>; /*for internal rd*/
+					<0x5 0xA 0x2>; /*<2p6v,0p8v,0p2v>*/
+				cc2_rp_4p7k_code = <0xC>;
+				cc2_rp_36k_code = <0xF>;
+				cc2_rp_12k_code = <0xE>;
+				cc2_rd_code = <0xF>; /*for internal rd*/
 				cc2_vref_ufp = /bits/ 8
-					<0xC 0xB 0x7>; /*<1p23v,0p66v,0p2v>*/
+					<0x8 0xA 0x2>; /*<1p23v,0p66v,0p2v>*/
 				cc2_vref_dfp_usb = /bits/ 8
-					<0x2 0x7 0x0>; /*<0_1p6v,0p2v,unused>*/
+					<0x7 0x2 0x0>; /*<0_1p6v,0p2v,unused>*/
 				cc2_vref_dfp_1_5 = /bits/ 8
-					<0x8 0x4 0x7>; /*<1_1p6v,0p4v,0p2v>*/
+					<0x7 0x3 0x2>; /*<1_1p6v,0p4v,0p2v>*/
 				cc2_vref_dfp_3_0 = /bits/ 8
-					<0x0 0x7 0x7>; /*<2p6v,0p8v,0p2v>*/
+					<0x5 0xA 0x2>; /*<2p6v,0p8v,0p2v>*/
 			};
 		};
 	};
@@ -242,7 +243,7 @@
 			usb-phy = <&dwc3_u2host_usb2phy>;
 			dr_mode = "host"; /*only host*/
 			//tx-fifo-resize;
-			snps,dis_u2_susphy_quirk; // Add workaround for Usb3.0 hub suspend
+			//snps,dis_u2_susphy_quirk; // Add workaround for Usb3.0 hub suspend
 			snps,dis_ss_park_mode; // disable usb3.0 park mode
 		};
 	};
@@ -324,7 +325,8 @@
 			usb-phy = <&dwc3_u3host_usb2phy &dwc3_u3host_usb3phy>;
 			dr_mode = "host"; /*only host*/
 			//tx-fifo-resize;
-			snps,dis_u2_susphy_quirk; // Add workaround for Usb3.0 hub suspend
+			//snps,dis_u2_susphy_quirk; // Add workaround for Usb3.0 hub suspend
+			snps,dis_u3_susphy_quirk;
 		};
 	};
 

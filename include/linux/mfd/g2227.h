@@ -41,6 +41,11 @@
 #define G2227_REG_VERSION               (0x20)
 #define G2227_REG_GMT_TESTING           (0xF1)
 
+/* register field: REG_SYS_CONTROL */
+#define G2227_SOFTOFF_MASK              (0x80)
+#define G2227_SOFTOFF_SHIFT             (7)
+#define G2227_SOFTOFF_WIDTH             (1)
+
 /* register field: ONOFF */
 #define G2227_DC1_ON_MASK               (0x80)
 #define G2227_DC1_ON_SHIFT              (7)

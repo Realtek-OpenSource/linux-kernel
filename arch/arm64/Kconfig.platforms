@@ -261,6 +261,7 @@ config ARCH_RTD16xx
 	select RTK_PLATFORM_PSCI
 	select PM_OPP
 	select IRDA
+	select ARM_GIC_V3_DEBUGFS
 	help
 	  This enables support for Realtek RTD16xx SoC Family
 

@@ -51,9 +51,12 @@
 
 extern struct proc_dir_entry proc_root;
 static struct proc_dir_entry *rtknand_proc_dir = NULL;
+#ifdef RTK_VERIFY
 unsigned int r_test_flag = 0;
 unsigned int w_test_flag = 0;
+unsigned int w_wait_flag = 0;
 unsigned int nomap_blk = 0;
+#endif
 static int g_id_chain = 0;
 extern unsigned int g_eccbits;
 extern dma_addr_t oobPhys_addr;
@@ -63,8 +66,7 @@ static struct mtd_partition rtk_partitions[] =
 {
     {
         .name   = "rtk_nand",
-	.size   = 0x8000000,
-	//.size   = 0x10000000,
+	.size   = 0x10000000,
 	.offset = 0x0
     },
 #if 0
@@ -86,9 +88,14 @@ static struct mtd_partition rtk_partitions[] =
     },
 #endif
     {
-        .name   = "test",
-        .size   = 0x100000,
-        .offset = 0x4000000
+        .name   = "yaffs",
+        .size   = 0x2000000,
+        .offset = 0x8000000
+    },
+    {
+        .name   = "ubifs",
+        .size   = 0x2000000,
+        .offset = 0x8000000 + 4000000
     }
 };
 #endif
@@ -96,6 +103,7 @@ static struct mtd_partition rtk_partitions[] =
 char g_rtk_nandinfo_line[64];
 
 void __iomem    *map_base = 0;
+void __iomem    *swc_base = 0;
 
 const char *ptypes[] = {"cmdlinepart", NULL};
 
@@ -103,10 +111,10 @@ const char *ptypes[] = {"cmdlinepart", NULL};
 //static int rtk_read_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, u_char *buf);
 static int rtk_read_ecc_page(struct mtd_info *mtd, u16 chipnr, unsigned int page,
 			u_char *data, u_char *oob_buf, u16 cp_mode, dma_addr_t *data_phy);
-//static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, const u_char *buf);
+static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, const u_char *buf);
 static int rtk_write_ecc_page(struct mtd_info *mtd, u16 chipnr, unsigned int page, const u_char *data, const u_char *oob_buf, const dma_addr_t *data_phy);
 static int rtk_erase_block(struct mtd_info *mtd, u16 chipnr, int page);
-
+void rtk_nand_reset(void);
 /* Global Variables */
 struct mtd_info *rtk_mtd;
 
@@ -141,22 +149,57 @@ void syncPageRead(void)
 	dmb(sy);
 }
 
-void WAIT_DONE(void *addr, u64 mask, unsigned int value)
+int WAIT_DONE(void *addr, u64 mask, unsigned int value)
 {
+	unsigned int test = 0x0;
+
+#ifdef RTK_VERIFY
+	if(w_wait_flag == 1) {
+		w_wait_flag = 0;
+		printk(KERN_ERR "WAIT_DONE timeout, do nand reset.\n");
+		return -WAIT_TIMEOUT;
+	}
+#endif
+
         while ( (REG_READ_U32((volatile unsigned int*)addr) & mask) != value ) {
                 asm("nop");
                 smp_wmb();
+		test++;
+
+		if (test == 0xFFFFFFFF) {
+			printk(KERN_ERR "WAIT_DONE timeout, do nand reset.\n");
+			return -WAIT_TIMEOUT;	
+		}
         }
+	
+	return 0;
 }
 
 void rtk_nand_reset(void)
 {
-	down_write(&rw_sem);
-	REG_WRITE_U32( REG_ND_CMD+map_base, CMD_RESET );
-	REG_WRITE_U32( REG_ND_CTL+map_base,0x80 );
-	WAIT_DONE(REG_ND_CTL+map_base,0x80,0);
-	WAIT_DONE(REG_ND_CTL+map_base,0x40,0x40);
-	up_write(&rw_sem);
+	int rc;
+
+        //down_write(&rw_sem);
+
+        // controller init.
+        REG_WRITE_U32(REG_PD + map_base, 0x1E);
+        REG_WRITE_U32(REG_TIME_PARA3 + map_base, 0x2);
+        REG_WRITE_U32(REG_TIME_PARA2 + map_base, 0x5);
+        REG_WRITE_U32(REG_TIME_PARA1 + map_base, 0x2);
+
+        REG_WRITE_U32(REG_MULTI_CHNL_MODE+map_base, 0x0);
+        REG_WRITE_U32(REG_READ_BY_PP+map_base, 0x0);
+
+        // reset nand.
+        REG_WRITE_U32(REG_ND_CMD+map_base, CMD_RESET);
+        REG_WRITE_U32(REG_ND_CTL+map_base, 0x80);
+        rc = WAIT_DONE(REG_ND_CTL+map_base,0x80,0);
+        rc = WAIT_DONE(REG_ND_CTL+map_base,0x40,0x40);
+
+        REG_WRITE_U32(REG_NF_LOW_PWR+map_base, REG_READ_U32(REG_NF_LOW_PWR+map_base)&~0x10);
+        REG_WRITE_U32(REG_SPR_DDR_CTL+map_base, NF_SPR_DDR_CTL_spare_ddr_ena(1) | NF_SPR_DDR_CTL_per_2k_spr_ena(1)| NF_SPR_DDR_CTL_spare_dram_sa(0));
+
+	//up_write(&rw_sem);
 }
 EXPORT_SYMBOL(rtk_nand_reset);
 
@@ -172,6 +215,7 @@ static int rtk_nand_suspend (struct device *dev)
 static int rtk_nand_resume (struct device *dev)
 {
         struct clk *clk = clk_get(dev, NULL);
+	int rc;
 
 	clk_prepare_enable(clk);
 
@@ -188,8 +232,8 @@ static int rtk_nand_resume (struct device *dev)
         REG_WRITE_U32(REG_ND_CMD+map_base, 0xff);
         REG_WRITE_U32(REG_ND_CTL+map_base, 0x80);
 
-        WAIT_DONE(REG_ND_CTL+map_base,0x80,0);
-        WAIT_DONE(REG_ND_CTL+map_base,0x40,0x40);
+        rc = WAIT_DONE(REG_ND_CTL+map_base,0x80,0);
+        rc = WAIT_DONE(REG_ND_CTL+map_base,0x40,0x40);
 
         REG_WRITE_U32(REG_NF_LOW_PWR+map_base, REG_READ_U32(REG_NF_LOW_PWR+map_base)&~0x10);
 
@@ -198,19 +242,36 @@ static int rtk_nand_resume (struct device *dev)
 	return 0;
 }
 
-#ifndef CONFIG_ARCH_RTD119X
-static void rtk_read_oob_from_SRAM(struct mtd_info *mtd, __u8 *r_oobbuf)
+static void rtk_read_oob_from_SRAM(struct mtd_info *mtd, __u8 *oobbuf)
 {
+	struct nand_chip *this = (struct nand_chip *) mtd->priv;
         unsigned int reg_oob;
         void __iomem *reg = NULL;
         int i;
+	char r_oobbuf[256];
+	int oobuse_size;
 
         REG_WRITE_U32(REG_READ_BY_PP+map_base,0x00);
         REG_WRITE_U32(REG_SRAM_CTL+map_base, 0x30 | 0x04);
 
+	memset(r_oobbuf, 0xFF, 256);
+	memset(oobbuf, 0xFF, mtd->oobsize);
+
         reg = ioremap(0x98010000, 0x100);
 
-        for(i = 0; i<16; i++) {
+	switch(this->ecc_select) {
+                case 0x0:
+                        oobuse_size = 6 + 10;
+                        break;
+                case 0x1:
+                        oobuse_size = 6 + 20;
+                        break;
+                default:
+                        oobuse_size = 6 + 10;
+                        break;
+        }
+
+        for(i = 0; i<(mtd->oobsize/4); i++) {
                 reg_oob = REG_READ_U32(reg+(i*4));
 
                 r_oobbuf[i*4] = reg_oob & 0xff;
@@ -219,16 +280,20 @@ static void rtk_read_oob_from_SRAM(struct mtd_info *mtd, __u8 *r_oobbuf)
                 r_oobbuf[(i*4)+3] = (reg_oob >> 24) & 0xff;
         }
 
+	for(i = 0; i < 4; i++) {
+		memcpy(oobbuf+(i*oobuse_size), r_oobbuf+(i*(mtd->oobsize/4)), oobuse_size);
+	}
+
         REG_WRITE_U32(REG_SRAM_CTL+map_base, 0x00);
         REG_WRITE_U32(REG_READ_BY_PP+map_base,0x80);
 
 	return;
 }
-#endif
 
 static void rtk_nand_read_id(struct mtd_info *mtd, u_char id[6])
 {
 	int id_chain;
+	int rc;
 
 	REG_WRITE_U32(REG_DATA_TL0+map_base,NF_DATA_TL0_length0(0x06));
 	REG_WRITE_U32(REG_DATA_TL1+map_base,NF_DATA_TL1_access_mode(0x01));
@@ -242,7 +307,7 @@ static void rtk_nand_read_id(struct mtd_info *mtd, u_char id[6])
 	//Set command
 	REG_WRITE_U32(REG_ND_CMD+map_base,NF_ND_CMD_cmd(CMD_READ_ID));
 	REG_WRITE_U32(REG_ND_CTL+map_base,NF_ND_CTL_xfer(0x01));
-	WAIT_DONE(REG_ND_CTL+map_base,0x80,0);
+	rc = WAIT_DONE(REG_ND_CTL+map_base,0x80,0);
 
 	//Set address
 	REG_WRITE_U32(REG_ND_PA0+map_base, 0);
@@ -250,10 +315,10 @@ static void rtk_nand_read_id(struct mtd_info *mtd, u_char id[6])
 	REG_WRITE_U32(REG_ND_PA2+map_base,NF_ND_PA2_addr_mode(0x07));
 
 	REG_WRITE_U32(REG_ND_CTL+map_base,NF_ND_CTL_xfer(1)|NF_ND_CTL_tran_mode(1));
-	WAIT_DONE(REG_ND_CTL+map_base,0x80,0);
+	rc = WAIT_DONE(REG_ND_CTL+map_base,0x80,0);
 	//Enable XFER mode
 	REG_WRITE_U32(REG_ND_CTL+map_base,NF_ND_CTL_xfer(1)|NF_ND_CTL_tran_mode(4));
-	WAIT_DONE(REG_ND_CTL+map_base,0x80,0);
+	rc = WAIT_DONE(REG_ND_CTL+map_base,0x80,0);
 
 	//Reset PP
 	REG_WRITE_U32(REG_PP_CTL0+map_base,NF_PP_CTL0_pp_reset(1));
@@ -308,11 +373,23 @@ static int rtk_erase_block(struct mtd_info *mtd, u16 chipnr, int page)
 	REG_WRITE_U32( REG_ND_PA3+map_base,NF_ND_PA3_page_addr3((page>> 21)&0x7) );
 
 	REG_WRITE_U32( REG_AUTO_TRIG+map_base,NF_AUTO_TRIG_auto_trig(1)|NF_AUTO_TRIG_spec_auto_case(1)|NF_AUTO_TRIG_auto_case(2) );
-	WAIT_DONE(REG_AUTO_TRIG+map_base,0x80,0);
+	if(WAIT_DONE(REG_AUTO_TRIG+map_base,0x80,0)) {
+		NF_ERR_PRINT("[%s] WAIT_DONE timeout. (%d)\n", __FUNCTION__, __LINE__);
+		up_write(&rw_sem);
+		return -WAIT_TIMEOUT;
+	}
 
 	REG_WRITE_U32(REG_POLL_FSTS+map_base,NF_POLL_FSTS_bit_sel(6)|NF_POLL_FSTS_trig_poll(1) );
-	WAIT_DONE(REG_POLL_FSTS+map_base,0x01,0x0);
-	WAIT_DONE(REG_ND_CTL+map_base,0x40,0x40);//add by alexchang 0416-2010
+	if(WAIT_DONE(REG_POLL_FSTS+map_base,0x01,0x0)) {
+		NF_ERR_PRINT("[%s] WAIT_DONE timeout. (%d)\n", __FUNCTION__, __LINE__);
+		up_write(&rw_sem);
+		return -WAIT_TIMEOUT;
+	}
+	if(WAIT_DONE(REG_ND_CTL+map_base,0x40,0x40)) {
+		NF_ERR_PRINT("[%s] WAIT_DONE timeout. (%d)\n", __FUNCTION__, __LINE__);
+		up_write(&rw_sem);
+		return -WAIT_TIMEOUT;
+	}
 
 	if ( REG_READ_U32(REG_ND_DAT+map_base) & 0x01 ){
 		up_write(&rw_sem);
@@ -322,10 +399,10 @@ static int rtk_erase_block(struct mtd_info *mtd, u16 chipnr, int page)
 
 	chip_section = (chipnr * this->page_num) >> 5;
 	section = page >> 5;
-
+#if 0
 	if(this->erase_page_flag)
 		memset ( (__u32 *)(this->erase_page_flag)+ chip_section + section, 0xff, ppb>>3);
-
+#endif
 	up_write(&rw_sem);
 	
 	return 0;
@@ -341,10 +418,6 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
 	uint8_t	bChkAllOne = 0;
     	volatile unsigned int data;
     	unsigned int eccNum = 0;
-#ifdef CONFIG_ARCH_RTD119X
-	extern dma_addr_t oobPhys_addr;
-	int spare_dram_sa;
-#endif
 
 	this = (struct nand_chip *) mtd->priv;
 	page_size = mtd->writesize;
@@ -444,10 +517,7 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
 		REG_WRITE_U32( REG_ECC_STOP+map_base,NF_ECC_STOP_ecc_n_stop(0x01));
 
 		REG_WRITE_U32(REG_ECC_SEL+map_base, this->ecc_select);
-#ifdef CONFIG_ARCH_RTD119X
-		spare_dram_sa = ( (uintptr_t)oobPhys_addr >> 3);
-                REG_WRITE_U32( REG_SPR_DDR_CTL+map_base,0x60000000 |NF_SPR_DDR_CTL_spare_dram_sa(spare_dram_sa));
-#endif
+
 		dram_sa = ( (uintptr_t)data_phy >> 3);
 		REG_WRITE_U32(REG_DMA_CTL1+map_base,NF_DMA_CTL1_dram_sa(dram_sa));
 		dma_len = page_size >> 9;
@@ -466,19 +536,28 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
 		//Enable Auto mode
 		REG_WRITE_U32( REG_AUTO_TRIG+map_base,NF_AUTO_TRIG_auto_trig(1)|NF_AUTO_TRIG_spec_auto_case(0)| NF_AUTO_TRIG_auto_case(auto_trigger_mode));
 
-		WAIT_DONE(REG_AUTO_TRIG+map_base,0x80,0);
-		WAIT_DONE(REG_DMA_CTL3+map_base,0x01,0);
+		if(WAIT_DONE(REG_AUTO_TRIG+map_base,0x80,0)) {
+			NF_ERR_PRINT("[%s] WAIT_DONE timeout. (%d)\n", __FUNCTION__, __LINE__);
+			up_write(&rw_sem);
+			return -WAIT_TIMEOUT;
+		}
+
+		if(WAIT_DONE(REG_DMA_CTL3+map_base,0x01,0)) {
+			NF_ERR_PRINT("[%s] WAIT_DONE timeout. (%d)\n", __FUNCTION__, __LINE__);
+                        up_write(&rw_sem);
+                        return -WAIT_TIMEOUT;
+		}
 
 		if(1) {
 			data = (REG_READ_U32(REG_SPR_DDR_CTL+map_base) & 0x1fffffff) << 3;	// physical address
 			NF_DEBUG_PRINT("data==> 0x%x\n",data);
 			NF_DEBUG_PRINT("oob_buf[0]==> 0x%x, page=0x%x\n",this->g_oobbuf[0],page);    
 		}
-#ifndef CONFIG_ARCH_RTD119X
+
 		if(oob_buf) {
 			rtk_read_oob_from_SRAM(mtd, oob_buf);
 		}
-#endif
+
 		// return OK if all data bit is 1 (page is not written yet)
 		if ((REG_READ_U32(REG_BLANK_CHK+map_base) & 0x8)==0){
 			REG_WRITE_U32(REG_BLANK_CHK+map_base,NF_BLANK_CHK_blank_ena(1)|NF_BLANK_CHK_read_ecc_xnor_ena(0));
@@ -509,6 +588,90 @@ static int rtk_read_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pag
 			return 0;
 		}
 	}
+}
+
+static int rtk_write_oob(struct mtd_info *mtd, u16 chipnr, int page, int len, const u_char *oob_buf)
+{
+        struct nand_chip *this = (struct nand_chip *) mtd->priv;
+        int rc = 0;
+        uint8_t auto_trigger_mode = 1;
+        uint8_t addr_mode = 1;
+        unsigned int page_len, dram_sa, dma_len, spare_dram_sa;
+        unsigned char oob_1stB;
+        unsigned int chip_section = 0;
+        unsigned int section =0;
+        unsigned int index =0;
+
+        memset(this->g_databuf, 0xff, page_size);
+
+        page_size = mtd->writesize;
+        oob_size = mtd->oobsize;
+        ppb = mtd->erasesize/mtd->writesize;
+
+        down_write(&rw_sem);
+
+	if ( len > oob_size || !oob_buf ){
+		NF_ERR_PRINT("[%s] error: len>oob_size OR oob_buf is NULL\n", __FUNCTION__);
+                up_write(&rw_sem);
+                return -1;
+        }
+	
+	REG_WRITE_U32(REG_SRAM_CTL+map_base,0x00);
+        REG_WRITE_U32(REG_DATA_TL0+map_base,NF_DATA_TL0_length0(0));
+        if(this->ecc_select >= 0x18) {
+                page_len = page_size >> 10;
+                REG_WRITE_U32(REG_DATA_TL1+map_base,NF_DATA_TL1_length1(4));
+        } else {
+                page_len = page_size >> 9;
+                REG_WRITE_U32(REG_DATA_TL1+map_base,NF_DATA_TL1_length1(2));
+        }
+
+	REG_WRITE_U32(REG_READ_BY_PP+map_base,NF_READ_BY_PP_read_by_pp(0));
+        REG_WRITE_U32(REG_PP_CTL1+map_base,NF_PP_CTL1_pp_start_addr(0));
+        REG_WRITE_U32(REG_PP_CTL0+map_base,0);
+
+        REG_WRITE_U32( REG_PAGE_LEN+map_base,NF_PAGE_LEN_page_len(page_len));
+
+        REG_WRITE_U32(REG_ND_CMD+map_base,NF_ND_CMD_cmd(CMD_PG_WRITE_C1));
+        REG_WRITE_U32(REG_CMD2+map_base,NF_CMD2_cmd2(CMD_PG_WRITE_C2));
+        REG_WRITE_U32(REG_CMD3+map_base,NF_CMD3_cmd3(CMD_PG_WRITE_C3));
+
+        REG_WRITE_U32( REG_ND_PA0+map_base,NF_ND_PA0_page_addr0(page));
+        REG_WRITE_U32( REG_ND_PA1+map_base,NF_ND_PA1_page_addr1(page>>8));
+        REG_WRITE_U32( REG_ND_PA2+map_base,NF_ND_PA2_addr_mode(addr_mode)|NF_ND_PA2_page_addr2(page>>16));
+        REG_WRITE_U32( REG_ND_PA3+map_base,NF_ND_PA3_page_addr3((page>>21)&0x7));
+        REG_WRITE_U32(REG_MULTI_CHNL_MODE+map_base,NF_MULTI_CHNL_MODE_edo(1));
+
+        REG_WRITE_U32(REG_ECC_SEL+map_base, this->ecc_select);
+
+	dram_sa = ((uintptr_t)this->g_databuf >> 3);
+        REG_WRITE_U32(REG_DMA_CTL1+map_base,NF_DMA_CTL1_dram_sa(dram_sa));
+        dma_len = page_size >> 9;
+        REG_WRITE_U32(REG_DMA_CTL2+map_base,NF_DMA_CTL2_dma_len(dma_len));
+        REG_WRITE_U32(REG_DMA_CTL3+map_base,NF_DMA_CTL3_ddr_wr(1)|NF_DMA_CTL3_dma_xfer(1));
+
+        spare_dram_sa = ((uintptr_t)oob_buf >> 3);
+        REG_WRITE_U32( REG_SPR_DDR_CTL+map_base,NF_SPR_DDR_CTL_spare_ddr_ena(1)|NF_SPR_DDR_CTL_per_2k_spr_ena(1)|NF_SPR_DDR_CTL_spare_dram_sa(spare_dram_sa));
+
+	REG_WRITE_U32( REG_AUTO_TRIG+map_base,NF_AUTO_TRIG_auto_trig(1)|NF_AUTO_TRIG_spec_auto_case(0)| NF_AUTO_TRIG_auto_case(auto_trigger_mode));
+
+	WAIT_DONE(REG_AUTO_TRIG+map_base,0x80,0);
+        WAIT_DONE(REG_DMA_CTL3+map_base,0x01,0);
+        REG_WRITE_U32(REG_POLL_FSTS+map_base,NF_POLL_FSTS_bit_sel(6)|NF_POLL_FSTS_trig_poll(1) );
+        WAIT_DONE(REG_POLL_FSTS+map_base,0x01,0x0);
+        WAIT_DONE(REG_ND_CTL+map_base,0x40,0x40);
+
+	if ( REG_READ_U32(REG_ND_DAT+map_base) & 0x01 ) {
+		NF_ERR_PRINT("[%s] write oob is not completed at page %d\n", __FUNCTION__, page);
+                up_write(&rw_sem);
+                return -1;
+        }
+
+	printk(KERN_ERR "[%s] write oob OK at page %d\n", __FUNCTION__, page);
+
+        up_write(&rw_sem);
+
+        return rc;
 }
 
 static int rtk_write_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int page, const u_char *data_buf, const  u_char *oob_buf, const dma_addr_t *data_phy)
@@ -649,25 +812,41 @@ static int rtk_write_ecc_page (struct mtd_info *mtd, u16 chipnr, unsigned int pa
 	REG_WRITE_U32( REG_AUTO_TRIG+map_base,NF_AUTO_TRIG_auto_trig(1)|NF_AUTO_TRIG_spec_auto_case(0)| NF_AUTO_TRIG_auto_case(auto_trigger_mode));
 	smp_wmb();
 
-	WAIT_DONE(REG_AUTO_TRIG+map_base,0x80,0);
-	WAIT_DONE(REG_DMA_CTL3+map_base,0x01,0);
+	if(WAIT_DONE(REG_AUTO_TRIG+map_base,0x80,0)) {
+		NF_ERR_PRINT("[%s] WAIT_DONE timeout. (%d)\n", __FUNCTION__, __LINE__);
+                up_write(&rw_sem);
+                return -WAIT_TIMEOUT;
+	}
+	if(WAIT_DONE(REG_DMA_CTL3+map_base,0x01,0)) {
+		NF_ERR_PRINT("[%s] WAIT_DONE timeout. (%d)\n", __FUNCTION__, __LINE__);
+                up_write(&rw_sem);
+                return -WAIT_TIMEOUT;
+	}
 	REG_WRITE_U32(REG_POLL_FSTS+map_base,NF_POLL_FSTS_bit_sel(6)|NF_POLL_FSTS_trig_poll(1) );
-	WAIT_DONE(REG_POLL_FSTS+map_base,0x01,0x0);
-	WAIT_DONE(REG_ND_CTL+map_base,0x40,0x40);//add by alexchang 0416-2010
+	if(WAIT_DONE(REG_POLL_FSTS+map_base,0x01,0x0)) {
+		NF_ERR_PRINT("[%s] WAIT_DONE timeout. (%d)\n", __FUNCTION__, __LINE__);
+                up_write(&rw_sem);
+                return -WAIT_TIMEOUT;
+	}
+	if(WAIT_DONE(REG_ND_CTL+map_base,0x40,0x40)) {//add by alexchang 0416-2010
+		NF_ERR_PRINT("[%s] WAIT_DONE timeout. (%d)\n", __FUNCTION__, __LINE__);
+                up_write(&rw_sem);
+                return -WAIT_TIMEOUT;
+	}
 
 	if ( REG_READ_U32(REG_ND_DAT+map_base) & 0x01 ){
 		up_write(&rw_sem);
 		NF_ERR_PRINT("[%s] write is not completed at page %d\n", __FUNCTION__, page);
 		return -1;
 	}
-	
+#if 0	
 	chip_section = (chipnr * this->page_num) >> 5;
 	section = page >> 5;
 	index = page & (32-1);
 
 	if (this->erase_page_flag)
 		this->erase_page_flag[chip_section+section] &= ~(1 << index);
-
+#endif
 	up_write(&rw_sem);
 	
 	return rc;
@@ -781,13 +960,43 @@ static int rtk_nand_clk_reset_ctrl(struct device *dev, int enable)
 	return 0;
 }
 
+static void rtk_nand_gating(void)
+{
+	REG_WRITE_U32(0x168+map_base, REG_READ_U32(0x168+map_base) | (0x1));
+	REG_WRITE_U32(0x168+map_base, REG_READ_U32(0x168+map_base) | (0x1 << 1));
+
+	REG_WRITE_U32(0x314+map_base, REG_READ_U32(0x314+map_base) | (0x1));
+	REG_WRITE_U32(0x314+map_base, REG_READ_U32(0x314+map_base) | (0x1 << 1));
+
+	//REG_WRITE_U32(0xf168+map_base, REG_READ_U32(0xf168+map_base) | (0x1));
+	//REG_WRITE_U32(0xf168+map_base, REG_READ_U32(0xf168+map_base) | (0x1 << 1));
+
+	//REG_WRITE_U32(0xf314+map_base, REG_READ_U32(0xf314+map_base) | (0x1));
+	//REG_WRITE_U32(0xf314+map_base, REG_READ_U32(0xf314+map_base) | (0x1 << 1));
+
+	REG_WRITE_U32(0x13c+map_base, REG_READ_U32(0x13c+map_base) | (0x1 << 3));
+	REG_WRITE_U32(0x13c+map_base, REG_READ_U32(0x13c+map_base) | (0x1 << 4));
+
+	REG_WRITE_U32(0x310+map_base, REG_READ_U32(0x310+map_base) | (0x1 << 5));
+	REG_WRITE_U32(0x310+map_base, REG_READ_U32(0x310+map_base) | (0x1 << 6));
+
+	//REG_WRITE_U32(0xf13c+map_base, REG_READ_U32(0xf13c+map_base) | (0x1 << 3));
+	//REG_WRITE_U32(0xf13c+map_base, REG_READ_U32(0xf13c+map_base) | (0x1 << 4));
+
+	//REG_WRITE_U32(0xf310+map_base, REG_READ_U32(0xf310+map_base) | (0x1 << 5));
+	//REG_WRITE_U32(0xf310+map_base, REG_READ_U32(0xf310+map_base) | (0x1 << 6));
+
+	REG_WRITE_U32(0x318+map_base, REG_READ_U32(0x318+map_base) | (0x1));
+
+}
+
 static int rtk_read_proc_nandinfo(struct seq_file *m, void *v) 
 {
 	struct nand_chip *this = (struct nand_chip *) rtk_mtd->priv;
 	int i;
 
-	seq_printf(m, "nand_size:%llu\n", (uint64_t)this->device_size);
-	seq_printf(m, "chip_size:%llu\n", (uint64_t)this->chipsize);
+	seq_printf(m, "nand_size:%u\n", (uint32_t)this->device_size);
+	seq_printf(m, "chip_size:%u\n", (uint32_t)this->chipsize);
 	seq_printf(m, "block_size:%u\n", rtk_mtd->erasesize);
 	seq_printf(m, "page_size:%u\n", rtk_mtd->writesize);
 	seq_printf(m, "oob_size:%u\n", rtk_mtd->oobsize);
@@ -796,8 +1005,21 @@ static int rtk_read_proc_nandinfo(struct seq_file *m, void *v)
 	seq_printf(m, "BBs:%u\n", this->BBs);
 	seq_printf(m, "ecc bits:%u\n", g_eccbits);
 	seq_printf(m, "\n");
-        seq_printf(m, "Bad block table:\n");
+#ifdef RTK_NAND_SHIFTABLE
+        seq_printf(m, "Shift block table:\n");
+	for ( i=0; i<STBCOUNT; i++){
+                if ( i==0 && this->sbt[i].chipnum == SB_INIT){
+                        seq_printf(m, "Congratulation!! No shift block in this Nand.\n");
+                        break;
+                }
 
+                if ( this->sbt[i].block != SB_INIT ){
+                        seq_printf(m, "[%d] (%d, %d, %d)\n", i, this->sbt[i].chipnum, this->sbt[i].block, this->sbt[i].shift);
+                }
+        }
+        seq_printf(m, "\n");
+#endif
+        seq_printf(m, "Bad block table:\n");
 	for ( i=0; i<this->RBA; i++){
                 if ( i==0 && this->bbt[i].BB_die == BB_DIE_INIT && this->bbt[i].bad_block == BB_INIT ){
                         seq_printf(m, "Congratulation!! No bad block in this Nand.\n");
@@ -834,9 +1056,8 @@ static const struct file_operations info_proc_fops = {
 static int test_read(struct seq_file *s, void *v)
 {
 	seq_printf(s, "EX.\n");
-	seq_printf(s, "echo read > /proc/rtknand/test  --->  do read backup test.\n");
-	seq_printf(s, "echo write > /proc/rtknand/test  --->  do write backup test.\n");
-	seq_printf(s, "echo debug > /proc/rtknand/test  --->  show debug message.\n");
+	seq_printf(s, "echo read > /proc/rtknand/test  --->  simulate read page ecc error.\n");
+	seq_printf(s, "echo write > /proc/rtknand/test  --->  simulate write page ecc error.\n");
 	seq_printf(s, "echo \"nomap 1234\" > /proc/rtknand/test  --->  set 1234 block as no map block.\n");
 	seq_printf(s, "\n");
         seq_printf(s, "r_test_flag :[%u]\n", r_test_flag);
@@ -870,6 +1091,9 @@ static int test_write(struct file *filp, const char *buff, unsigned long len, vo
 		}
 		else if(strstr(tmpbuf, "write") != NULL) {
 			w_test_flag = 1;
+		}
+		else if(strstr(tmpbuf, "timeout") != NULL) {
+			w_wait_flag = 1;
 		}
         }
 
@@ -911,8 +1135,11 @@ static int rtk_nand_probe(struct platform_device *pdev)
 	init_rwsem(&rw_sem);
 
 	map_base = of_iomap(rtk129x_nand_node, 0);
+	swc_base = of_iomap(rtk129x_nand_node, 1);
 
     	rtk_nand_clk_reset_ctrl(&pdev->dev, CTL_ENABLE);
+
+	rtk_nand_gating();
 
 	// controller init.
 	REG_WRITE_U32(REG_PD + map_base, 0x1E);
@@ -927,8 +1154,8 @@ static int rtk_nand_probe(struct platform_device *pdev)
 	REG_WRITE_U32(REG_ND_CMD+map_base, 0xff);
 	REG_WRITE_U32(REG_ND_CTL+map_base, 0x80);
 
-	WAIT_DONE(REG_ND_CTL+map_base,0x80,0);
-	WAIT_DONE(REG_ND_CTL+map_base,0x40,0x40);
+	rc = WAIT_DONE(REG_ND_CTL+map_base,0x80,0);
+	rc = WAIT_DONE(REG_ND_CTL+map_base,0x40,0x40);
 	NF_DEBUG_PRINT("nand ready. \n");
 
 	REG_WRITE_U32(REG_NF_LOW_PWR+map_base, REG_READ_U32(REG_NF_LOW_PWR+map_base)&~0x10);
@@ -948,7 +1175,7 @@ static int rtk_nand_probe(struct platform_device *pdev)
 	this->read_ecc_page 	= rtk_read_ecc_page;
 	this->read_oob 		= NULL; //rtk_read_oob;
 	this->write_ecc_page	= rtk_write_ecc_page;
-	this->write_oob		= NULL; //rtk_write_oob;
+	this->write_oob		= rtk_write_oob;
 	this->erase_block 	= rtk_erase_block;
 	//this->suspend		= rtk_nand_suspend;
 	//this->resume		= rtk_nand_resume;
@@ -967,11 +1194,13 @@ static int rtk_nand_probe(struct platform_device *pdev)
 EXIT:
 	if (rc < 0) {
 		if (rtk_mtd) {
+#if 0
 			if (this->erase_page_flag) {
 				unsigned int flag_size =  (this->numchips * this->page_num) >> 3;
 				unsigned int mempage_order = get_order(flag_size);
 				free_pages((unsigned long)this->erase_page_flag, mempage_order);
 			}
+#endif
 			kfree(rtk_mtd);
 		}
 	} else {
@@ -992,11 +1221,13 @@ static int rtk_nand_remove(struct platform_device *dev)
 			kfree(this->g_databuf);
 		if(this->g_oobbuf)
 			kfree(this->g_oobbuf);
+#if 0
 		if (this->erase_page_flag){
 			unsigned int flag_size =  (this->numchips * this->page_num) >> 3;
 			unsigned int mempage_order = get_order(flag_size);
 			free_pages((unsigned long)this->erase_page_flag, mempage_order);
 		}
+#endif
 		kfree(rtk_mtd);
 
 	}

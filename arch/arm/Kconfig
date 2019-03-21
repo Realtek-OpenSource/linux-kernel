@@ -282,7 +282,8 @@ config PHYS_OFFSET
 			ARCH_RTD119X || \
 			ARCH_RTD129x || \
 			ARCH_RTD139x || \
-			ARCH_RTD16xx
+			ARCH_RTD16xx || \
+			ARCH_RTD13xx
 	default 0x10000000 if ARCH_OMAP1 || ARCH_RPC
 	default 0x20000000 if ARCH_S5PV210
 	default 0xc0000000 if ARCH_SA1100
@@ -653,6 +654,8 @@ source "arch/arm/mach-rtd129x/Kconfig"
 source "arch/arm/mach-rtd139x/Kconfig"
 
 source "arch/arm/mach-rtd16xx/Kconfig"
+
+source "arch/arm/mach-rtd13xx/Kconfig"
 
 endchoice
 
@@ -1309,6 +1312,12 @@ source "drivers/pcmcia/Kconfig"
 endmenu
 
 menu "Kernel Features"
+
+config ARM_NORMAL_WORLD_OS
+        bool "Enable TrustZone"
+        default n
+        help
+		Enable TrustZone configuration
 
 config HAVE_SMP
 	bool

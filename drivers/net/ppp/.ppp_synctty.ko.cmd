@@ -1,1 +1,0 @@
-cmd_drivers/net/ppp/ppp_synctty.ko := ccache arm-linux-gnueabi-ld -EL -r  -T ./scripts/module-common.lds --build-id  -o drivers/net/ppp/ppp_synctty.ko drivers/net/ppp/ppp_synctty.o drivers/net/ppp/ppp_synctty.mod.o ;  true

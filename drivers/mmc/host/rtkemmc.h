@@ -100,6 +100,7 @@ struct rtkemmc_host {
 	volatile void __iomem	*sb2_membase;	
 	volatile void __iomem	*misc_membase;
 	volatile void __iomem   *sb2_debug_membase;
+	volatile void __iomem   *hw_semaphore;
 #if defined(CONFIG_ARCH_RTD139x)
 	volatile void __iomem   *iso_muxpad;
 #elif defined(CONFIG_ARCH_RTD16xx)

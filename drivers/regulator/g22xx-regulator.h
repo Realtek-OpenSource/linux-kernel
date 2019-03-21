@@ -95,4 +95,8 @@ static inline int g22xx_regulator_type_is_ldo(struct g22xx_regulator_desc *gd)
 	return gd->desc.of_map_mode == g22xx_regulator_ldo_of_map_mode;
 }
 
+
+/* pm_power_off setup */
+int g22xx_setup_pm_power_off(struct g22xx_device *gdev, u32 reg, u32 mask);
+
 #endif

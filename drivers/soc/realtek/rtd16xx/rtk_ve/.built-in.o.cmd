@@ -1,1 +1,0 @@
-cmd_drivers/soc/realtek/rtd16xx/rtk_ve/built-in.o :=  ccache arm-linux-gnueabi-ld -EL    -r -o drivers/soc/realtek/rtd16xx/rtk_ve/built-in.o drivers/soc/realtek/rtd16xx/rtk_ve/puwrap.o drivers/soc/realtek/rtd16xx/rtk_ve/ve1/built-in.o drivers/soc/realtek/rtd16xx/rtk_ve/jdi/built-in.o 

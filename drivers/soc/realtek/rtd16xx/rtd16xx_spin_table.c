@@ -161,7 +161,7 @@ static void smp_spin_table_cpu_die(unsigned int cpu)
 	 * to let Bl31 know slave cpu will resume
 	 */
 	asm volatile("isb" : : : "cc");
-	asm volatile("ldr x1, =0x20000" : : : "cc");
+	asm volatile("ldr x1, =0x1619" : : : "cc");
 	asm volatile("ldr x0, =0x8400ff04" : : : "cc");
 	asm volatile("isb" : : : "cc");
 	asm volatile("smc #0" : : : "cc");

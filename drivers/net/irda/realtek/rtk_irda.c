@@ -162,6 +162,7 @@ struct irda_protocol_desc {
 	unsigned int debounce;
 
 	unsigned int multi_remote;
+	unsigned int wakeup_key;
 };
 
 struct irda_chrdev {
@@ -1141,6 +1142,10 @@ static int get_desc_from_dtb(struct device *dev,
 		if (of_property_read_u32(np, "repeat-time", &desc->repeat_time))
 			desc->repeat_time = 250;
 
+		if (of_property_read_u32(np, "wakeup-key", &desc->wakeup_key))
+			desc->wakeup_key = 116;
+
+		dev_err(dev, "wakeup key = %d\n", desc->wakeup_key);
 		desc->index = get_irda_protocol_index(str, desc->mode, mode);
 		if (desc->index < 0)
 			continue;
@@ -1214,11 +1219,51 @@ get_next_keytable:
 	return cnt;
 }
 
+#ifdef CONFIG_PM
+static int irda_set_wakeup_keys(struct rtk_irda_dev *irda_dev,
+				struct ipc_shm_irda *p_table)
+{
+	struct irda_protocol_desc *desc;
+	struct irda_key_table *table;
+	int i, j, k;
+	int cnt = 0;
+
+	for (i = 0; i < irda_dev->rx_cnt; i++) {
+		desc = irda_dev->rx_desc + i;
+		for (j = 0; j < desc->multi_remote; j++) {
+			table = desc->keytable + j;
+			p_table->key_tbl[cnt].protocol = htonl(0);
+			p_table->key_tbl[cnt].scancode_mask = htonl(table->scancode_msk);
+			p_table->key_tbl[cnt].cus_mask = htonl(table->custcode_msk);
+			p_table->key_tbl[cnt].cus_code = htonl(table->cust_code);
+
+			for (k = 0; k < table->size; k++) {
+				if (desc->wakeup_key == table->keys[k].keycode) {
+					p_table->key_tbl[cnt].wakeup_scancode =
+							htonl(table->keys[k].scancode);
+					break;
+				}
+			}
+			cnt ++;
+		}
+	}
+	p_table->dev_count = htonl(cnt);
+	p_table->ipc_shm_ir_magic = htonl(0x49525641);
+
+	return 0;
+}
+#endif
+
 int rtk_irda_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct rtk_irda_dev *irda_dev;
 	struct irda_protocol_desc *desc;
+#ifdef CONFIG_PM
+	struct rtk_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
+	struct ipc_shm_irda __iomem *ir_ipc;
+	unsigned int phy_ir_ipc;
+#endif
 	int ret;
 
 	/* malloc memory for irda device */
@@ -1288,6 +1333,18 @@ int rtk_irda_probe(struct platform_device *pdev)
 		dev_err(dev, "cannot register IRQ\n");
 		goto read_dtb_fail;
 	}
+
+#ifdef CONFIG_PM
+	ir_ipc = (void __iomem *)(IPC_SHM_VIRT + sizeof(*ipc));
+	phy_ir_ipc = RPC_COMM_PHYS + 0xC4 + sizeof(*ipc);
+
+#ifdef CONFIG_ARCH_RTD16xx
+	irda_set_wakeup_keys(irda_dev, &pcpu_data_irda);
+#else
+	irda_set_wakeup_keys(irda_dev, ir_ipc);
+#endif
+	writel(cpu_to_be32(phy_ir_ipc), &(ipc->ir_extended_tbl_pt));
+#endif
 	return 0;
 
 read_dtb_fail:
@@ -1321,145 +1378,33 @@ int rtk_irda_remove(struct platform_device *pdev)
 }
 
 #ifdef CONFIG_PM
-#if defined(CONFIG_ARCH_RTD16xx)
-static int irda_set_wakeup_keys(struct rtk_irda_dev *irda_dev,
-				struct ipc_shm_irda *pcpu_irda, unsigned int key)
+static int rtk_irda_suspend(struct device *dev)
 {
-	struct irda_protocol_desc *desc;
-	struct irda_key_table *table;
-	int i, j, k;
-	int cnt = 0;
+	struct rtk_irda_dev *irda_dev = dev_get_drvdata(dev);
+	void __iomem *reg = irda_dev->reg;
+	unsigned int regValue;
 
-	for (i = 0; i < irda_dev->rx_cnt; i++) {
-		desc = irda_dev->rx_desc + i;
-		for (j = 0; j < desc->multi_remote; j++) {
-			table = desc->keytable + j;
-			pcpu_irda->key_tbl[cnt].protocol = htonl(0);
-			pcpu_irda->key_tbl[cnt].scancode_mask = htonl(table->scancode_msk);
-			pcpu_irda->key_tbl[cnt].cus_mask = htonl(table->custcode_msk);
-			pcpu_irda->key_tbl[cnt].cus_code = htonl(table->cust_code);
+	dev_info(dev, "Enter %s\n", __func__);
 
-			for (k = 0; k < table->size; k++) {
-				if (key == table->keys[k].keycode) {
-					pcpu_irda->key_tbl[cnt].wakeup_scancode =
-							htonl(table->keys[k].scancode);
-					break;
-				}
-			}
-			cnt ++;
-		}
+	while (readl(reg + IR_SR_OFF) & 0x1) {
+		writel(0x00000003, reg + IR_SR_OFF); /* clear IRDVF */
+		regValue = readl(reg + IR_RP_OFF); /* read IRRP */
 	}
-	pcpu_irda->dev_count = htonl(cnt);
-	pcpu_irda->ipc_shm_ir_magic = htonl(0x49525641);
+	regValue = readl(reg + IR_CR_OFF);
+	regValue = regValue & ~(0x400);
+	writel(regValue, reg + IR_CR_OFF);
 
+	dev_info(dev, "Exit %s\n", __func__);
 	return 0;
 }
-#else
-static int irda_set_wakeup_keys(struct rtk_irda_dev *irda_dev,
-				struct ipc_shm_irda *p_table, unsigned int key)
-{
-	struct irda_protocol_desc *desc;
-	struct irda_key_table *table;
-	int i, j, k;
-	int cnt = 0;
-
-	for (i = 0; i < irda_dev->rx_cnt; i++) {
-		desc = irda_dev->rx_desc + i;
-		for (j = 0; j < desc->multi_remote; j++) {
-			table = desc->keytable + j;
-			p_table->key_tbl[cnt].protocol = htonl(0);
-			p_table->key_tbl[cnt].scancode_mask = htonl(table->scancode_msk);
-			p_table->key_tbl[cnt].cus_mask = htonl(table->custcode_msk);
-			p_table->key_tbl[cnt].cus_code = htonl(table->cust_code);
-
-			for (k = 0; k < table->size; k++) {
-				if (key == table->keys[k].keycode) {
-					p_table->key_tbl[cnt].wakeup_scancode =
-							htonl(table->keys[k].scancode);
-					break;
-				}
-			}
-			cnt ++;
-		}
-	}
-	p_table->dev_count = htonl(cnt);
-	p_table->ipc_shm_ir_magic = htonl(0x49525641);
-
-	return 0;
-}
-#endif
 
 static void rtk_irda_shutdown(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct rtk_irda_dev *irda_dev = dev_get_drvdata(dev);
-	struct rtk_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
-	struct ipc_shm_irda __iomem *ir_ipc;
-	void __iomem *reg = irda_dev->reg;
-	unsigned int phy_ir_ipc;
-	unsigned int regValue;
-#ifdef CONFIG_RTK_XEN_SUPPORT
-        if (xen_domain() && !xen_initial_domain()) {
-                dev_info(dev, "skip %s in DomU\n", __func__);
-                return;
-        }
-#endif
-	dev_info(dev, "Enter %s\n", __func__);
 
-	ir_ipc = (void __iomem *)(IPC_SHM_VIRT + sizeof(*ipc));
-	phy_ir_ipc = RPC_COMM_PHYS + 0xC4 + sizeof(*ipc);
+	rtk_irda_suspend(dev);
 
-#if defined(CONFIG_ARCH_RTD16xx)
-	irda_set_wakeup_keys(irda_dev, &pcpu_data_irda, 116);
-#else
-	irda_set_wakeup_keys(irda_dev, ir_ipc, 116);
-#endif
-
-	writel(cpu_to_be32(phy_ir_ipc), &(ipc->ir_extended_tbl_pt));
-
-	while (readl(reg + IR_SR_OFF) & 0x1) {
-		writel(0x00000003, reg + IR_SR_OFF); /* clear IRDVF */
-		regValue = readl(reg + IR_RP_OFF); /* read IRRP */
-	}
-	regValue = readl(reg + IR_CR_OFF);
-	regValue = regValue & ~(0x400);
-	writel(regValue, reg + IR_CR_OFF);
-
-	dev_info(dev, "Exit %s\n", __func__);
-}
-
-static int rtk_irda_suspend(struct device *dev)
-{
-	struct rtk_irda_dev *irda_dev = dev_get_drvdata(dev);
-	struct rtk_ipc_shm __iomem *ipc = (void __iomem *)IPC_SHM_VIRT;
-	struct ipc_shm_irda __iomem *ir_ipc;
-	void __iomem *reg = irda_dev->reg;
-	unsigned int phy_ir_ipc;
-	unsigned int regValue;
-
-	dev_info(dev, "Enter %s\n", __func__);
-
-	ir_ipc = (void __iomem *)(IPC_SHM_VIRT + sizeof(*ipc));
-	phy_ir_ipc = RPC_COMM_PHYS + 0xC4 + sizeof(*ipc);
-
-#if defined(CONFIG_ARCH_RTD16xx)
-	irda_set_wakeup_keys(irda_dev, &pcpu_data_irda, 116);
-#else
-	irda_set_wakeup_keys(irda_dev, ir_ipc, 116);
-#endif
-
-	writel(cpu_to_be32(phy_ir_ipc), &(ipc->ir_extended_tbl_pt));
-
-	while (readl(reg + IR_SR_OFF) & 0x1) {
-		writel(0x00000003, reg + IR_SR_OFF); /* clear IRDVF */
-		regValue = readl(reg + IR_RP_OFF); /* read IRRP */
-	}
-	regValue = readl(reg + IR_CR_OFF);
-	regValue = regValue & ~(0x400);
-	writel(regValue, reg + IR_CR_OFF);
-
-	dev_info(dev, "Exit %s\n", __func__);
-	return 0;
+	return;
 }
 
 static int rtk_irda_resume(struct device *dev)

@@ -24,7 +24,6 @@
 #include <linux/of_address.h>
 #include <linux/of_gpio.h>
 
-#include <linux/reset-helper.h> /* rstc_get */
 #include <linux/reset.h>
 #include <linux/clk.h> /* clk_get */
 #include <linux/clk-provider.h>
@@ -159,6 +158,10 @@ static long hdmitx_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	case HDMI_SET_VO_INTERFACE_TYPE:
 		return ops_set_interface_type((void __user *)arg);
+
+	case HDMI_GET_CONFIG_TV_SYSTEM:
+		return ops_get_config_tv_system((void __user *)arg);
+
 	default:
 		HDMI_DEBUG(" Unknown ioctl cmd %08x", cmd);
 		return -EFAULT;

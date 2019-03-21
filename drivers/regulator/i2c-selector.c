@@ -63,8 +63,9 @@ static int selector_get_selection(struct i2c_client *client)
 }
 
 static int selector_match_from_sibling(struct i2c_client *client,
-	struct i2c_driver *selection_drv, struct device_node **out_np,
-	const struct i2c_device_id **out_id)
+				       struct i2c_driver *selection_drv,
+				       struct device_node **out_np,
+				       const struct i2c_device_id **out_id)
 {
 	struct device *dev = &client->dev;
 	struct device_node *parent = dev->parent->of_node;
@@ -92,7 +93,7 @@ static int selector_match_from_sibling(struct i2c_client *client,
 }
 
 static void selector_update_selector_driver(struct i2c_driver *drv,
-	const struct i2c_driver *src)
+					    const struct i2c_driver *src)
 {
 	WARN_ON(drv->driver.pm);
 	WARN_ON(drv->shutdown);
@@ -104,7 +105,8 @@ static void selector_update_selector_driver(struct i2c_driver *drv,
 }
 
 static void selector_replace_rdev_np(struct device *dev,
-	struct device_node *selector_np, const char *selection_id)
+				     struct device_node *selector_np,
+				     const char *selection_id)
 {
 	struct device_node *saved_np = dev->of_node;
 	struct device_node *child;
@@ -133,7 +135,7 @@ static void selector_replace_rdev_np(struct device *dev,
 }
 
 static int selector_probe(struct i2c_client *client,
-	const struct i2c_device_id *id)
+			  const struct i2c_device_id *id)
 {
 	struct device *dev = &client->dev;
 	struct device_node *np = dev->of_node;

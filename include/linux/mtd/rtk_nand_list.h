@@ -87,8 +87,10 @@
 #define MX30LF1G18AC		0xC2F18095	//128 MB, 1 dies
 #define MX30LF1G08AM		0xC2F1801D	//128 MB, 1 dies
 #define MX30LF1208AA		0xC2F0801D	//64MB, 1 dies
-#define MX30LF2G28AC		0xC2DA9095	//Macronix 2Gb
-#define MX30LF4G28AC		0xC2DC9095	//Macronix 4Gb
+//#define MX30LF2G28AC		0xC2DA9095	//Macronix 2Gb
+//#define MX30LF4G28AC		0xC2DC9095	//Macronix 4Gb
+#define MX30LF2G28AC		0x9590DAC2	//Macronix 2Gb
+#define MX30LF4G28AC		0x9590DCC2	//Macronix 4Gb
 
 
 #define EN27LN4G08		0xC8DC9095
@@ -120,6 +122,25 @@
 
 /*Power Chip*/
 #define ASU1GA30HT		0x92F18095
+
+typedef struct __attribute__ ((__packed__)){
+        unsigned char   *name;
+        unsigned int    id;
+        uint64_t        size;   //nand total size
+        uint64_t        chipsize;       //die size
+        unsigned int    PageSize;
+        unsigned int    BlockSize;
+        unsigned short  OobSize;
+        unsigned char   num_chips;
+        unsigned char   isLastPage;     //page position of block to check BB
+        unsigned char   CycleID5th; //If CycleID5th do not exist, set it to 0xff
+        unsigned char   CycleID6th; //If CycleID6th do not exist, set it to 0xff
+        unsigned short  ecc_num;
+        unsigned char   T1;
+        unsigned char   T2;
+        unsigned char   T3;
+        unsigned short  eccSelect;//Ecc ability select:   add by alexchang 0319-2010
+} device_type_t;
 
 device_type_t nand_device[] = {
 	{"MT29F2G08AAD", MT29F2G08AAD, 0x10000000, 0x10000000, 2048, 64*2048, 64, 1, 0, 0xff, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
@@ -194,13 +215,13 @@ device_type_t nand_device[] = {
 	{"W29N01GV", W29N01GV, 0x8000000, 0x8000000, 2048,  64*2048, 64, 1, 0, 0x0, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
 	{"W29N02GV", W29N02GV, 0x10000000, 0x10000000, 2048,  64*2048, 64, 1, 0, 0x4, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
 	{"W29N04GV", W29N04GV, 0x20000000, 0x20000000, 2048,  64*2048, 64, 1, 0, 0x54, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
-	{"MX30LF4G18AC", MX30LF4G18AC, 0x20000000, 0x20000000, 2048,  64*2048, 64, 1, 0, 0x56, 0x00, 0xff, 0x01, 0x01, 0x01, 0x00},
+	{"MX30LF4G18AC", MX30LF4G18AC, 0x20000000, 0x20000000, 2048,  64*2048, 64, 1, 0, 0x57, 0x00, 0xff, 0x01, 0x01, 0x01, 0x00},
 	{"MX30LF2G18AC", MX30LF2G18AC, 0x10000000, 0x10000000, 2048,  64*2048, 64, 1, 0, 0x07, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
 	{"MX30LF1G18AC", MX30LF1G18AC, 0x8000000, 0x8000000, 2048,  64*2048, 64, 1, 0, 0x02, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
 	{"MX30LF1G08AM", MX30LF1G08AM, 0x8000000, 0x8000000, 2048,  64*2048, 64, 1, 0, 0xff, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
 	{"MX30LF1208AA", MX30LF1208AA, 0x4000000, 0x4000000, 2048,  64*2048, 64, 1, 0, 0xff, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},	
 	{"MX30LF2G28AC", MX30LF2G28AC, 0x10000000, 0x10000000, 2048,  64*2048, 64, 1, 0, 0x07, 0xff, 0xff, 0x01, 0x01, 0x01, 0x01},	
-	{"MX30LF4G28AC", MX30LF4G28AC, 0x20000000, 0x20000000, 2048,  64*2048, 64, 1, 0, 0x57, 0x00, 0xff, 0x01, 0x01, 0x01, 0x01},	
+	{"MX30LF4G28AC", MX30LF4G28AC, 0x20000000, 0x20000000, 2048,  64*2048, 64, 1, 0, 0x67, 0xff, 0xff, 0x01, 0x01, 0x01, 0x01},	
 	{"F59L1G81A", F59L1G81A, 0x8000000, 0x8000000, 2048,  64*2048, 64, 1, 0, 0x40, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},	   
 	{"F59L2G81A", F59L2G81A, 0x10000000, 0x10000000, 2048,  64*2048, 64, 1, 0, 0x44, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00},
 	{"EN27LN4G08", EN27LN4G08, 0x20000000, 0x20000000, 2048,  64*2048, 64, 1, 0, 0x54, 0xff, 0xff, 0x01, 0x01, 0x01, 0x00}, 	

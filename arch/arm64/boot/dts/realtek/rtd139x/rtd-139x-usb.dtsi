@@ -126,7 +126,8 @@
 			//debug; /*to enable debug log*/
 			delay_probe_work; /*To delay probe work*/
 			ordered_probe; /*ordered probe in delay work*/
-			boot_check_time = <15000>; /*ms (At boot Device switch Host time)*/
+			boot_check_time = <30000>; /*ms (At boot Device switch Host time)*/
+			filter_config_channel_signal; /* A sw debounce to filter cc signal */
 
 			default_revision = <0xA00>;
 			A00 {

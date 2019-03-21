@@ -2,7 +2,7 @@
 #include <dt-bindings/soc/rtd16xx,memory.h>
 
 /* DRM protect region */
-/* /memreserve/ 0x10200000 0x03A00000; */
+/memreserve/ TEE_OS_SLIM_PHYS TEE_OS_SLIM_SIZE;
 /* /memreserve/ 0x0F900000 0x00307000; */
 /* /memreserve/ 0x0FC07000 0x001F9000; */
 /* /memreserve/ 0x00000000 0x00001000; */
@@ -35,6 +35,7 @@
 
 #include "rtd-16xx.dtsi"
 #include "rtd-1619-usb.dtsi"
+#include "rtd-1619-sata.dtsi"
 
 / {
 	model= "Realtek_Mjolnir_1GB";
@@ -63,7 +64,7 @@
 	chosen {
 		linux,initrd-start = <ROOTFS_NORMAL_START>;
 		linux,initrd-end = <ROOTFS_NORMAL_END>;
-		bootargs = "earlycon=uart8250,mmio32,0x98007800 console=ttyS0,115200 init=/init androidboot.storage=emmc androidboot.hardware=thor androidboot.serialno=thor000 loglevel=4";
+		bootargs = "earlycon=uart8250,mmio32,0x98007800 console=ttyS0,115200 init=/init vmalloc=360M loop.max_part=7 androidboot.storage=emmc androidboot.hardware=thor loglevel=4";
 		swiotlb-memory-reservation-size = <512>; /*  512: 1MB,  2048: 4MB*/
 		swiotlb-force = <0>; /* 0: SWIOTLB_NORMAL, 1: SWIOTLB_FORCE, 2: SWIOTLB_NO_FORCE */
 		cma-region-enable = <1>;
@@ -213,5 +214,21 @@
 		buffer-cnt = <3>;
 		resolution = <1920 1080>;
 		fps = <60>;
+	};
+
+	dptx@9803D000 {
+		status = "disabled";
+	};
+
+	sata_phy: sata_phy@9803FF60 {
+		sata-phy@0 {
+			status = "disabled";
+		};
+	};
+
+	ahci_sata: sata@9803F000 {
+		sata-port@0 {
+			/delete-property/ phys;
+		};
 	};
 };

@@ -1350,16 +1350,17 @@ void vo_common_setting(struct rtk_dptx_hwinfo *hwinfo)
 void dptx_lvdsint_en(struct rtk_dptx_hwinfo *hwinfo, int en)
 {
 	void __iomem *lvds_base = hwinfo->lvds_base;
+	void __iomem *base = hwinfo->reg_base;
 	unsigned int reg;
 
 	reg = readl(lvds_base + DV_SYNC_INT);
-	if(en)
+	if(en) {
 		reg = reg | 0x80000000;
-	else
+	} else {
+		SetReg(base, PBB_C8_VBID_FW_CTL, 0x1);
 		reg = reg & ~0x80000000;
+	}
 	writel(reg, lvds_base + DV_SYNC_INT);
-
-	reg = readl(lvds_base + DV_SYNC_INT);
 }
 
 void dptx_set_720p_1lane(struct rtk_dptx_hwinfo *hwinfo)
