@@ -285,6 +285,7 @@ struct _mmc_csd {
 /*we port kernel 4.14-4.16 command queue function to kernel 4.9 for realtek eMMC 5.1 IP*/
 #if defined(CONFIG_ARCH_RTD13xx) && defined(CONFIG_MMC_RTK_EMMC) && defined(CONFIG_MMC_RTK_EMMC_CMDQ)
 #define EXT_CSD_CMDQ_MODE_EN		15	/* R/W */
+#define EXT_CSD_CMDQ			15	/* R/W */
 #endif
 
 #define EXT_CSD_FLUSH_CACHE		32      /* W */

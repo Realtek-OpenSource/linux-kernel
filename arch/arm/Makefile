@@ -128,6 +128,10 @@ CFLAGS_ISA	:=$(call cc-option,-marm,)
 AFLAGS_ISA	:=$(CFLAGS_ISA)
 endif
 
+ifeq ($(CONFIG_THUMB2_KERNEL),y)
+CFLAGS_MODULE  +=-mlong-calls
+endif
+
 # Need -Uarm for gcc < 3.x
 KBUILD_CFLAGS	+=$(CFLAGS_ABI) $(CFLAGS_ISA) $(arch-y) $(tune-y) $(call cc-option,-mshort-load-bytes,$(call cc-option,-malignment-traps,)) -msoft-float -Uarm
 KBUILD_AFLAGS	+=$(CFLAGS_ABI) $(AFLAGS_ISA) $(arch-y) $(tune-y) -include asm/unified.h -msoft-float
@@ -153,6 +157,7 @@ textofs-$(CONFIG_ARCH_RTD119X) := 0x00108000
 textofs-$(CONFIG_ARCH_RTD129x) := 0x00208000
 textofs-$(CONFIG_ARCH_RTD139x) := 0x00208000
 textofs-$(CONFIG_ARCH_RTD16xx) := 0x00208000
+textofs-$(CONFIG_ARCH_RTD13xx) := 0x00208000
 
 # Machine directory name.  This list is sorted alphanumerically
 # by CONFIG_* macro name.
@@ -231,6 +236,7 @@ machine-$(CONFIG_ARCH_RTD119X)	+= rtd119x
 machine-$(CONFIG_ARCH_RTD129x)	+= rtd129x
 machine-$(CONFIG_ARCH_RTD139x)	+= rtd139x
 machine-$(CONFIG_ARCH_RTD16xx)  += rtd16xx
+machine-$(CONFIG_ARCH_RTD13xx)  += rtd13xx
 
 # Platform directory name.  This list is sorted alphanumerically
 # by CONFIG_* macro name.

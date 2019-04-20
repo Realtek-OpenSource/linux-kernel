@@ -50,6 +50,10 @@ int rtk_filter_specific_profuct_vic(struct edid *edid, struct sink_capabilities_
 		sink_cap->vic2 = 0;
 		sink_cap->extended_vic = 0;
 		sink_cap->vic2_420 = 0;
+	} else if ((get_rtd_chip_id() == CHIP_ID_RTD1395) && (get_rtd_chip_revision() == RTD_CHIP_A02)) {
+		sink_cap->vic2 = 0;
+		sink_cap->extended_vic = 0;
+		sink_cap->vic2_420 = 0;
 	}
 
 	for (i = 0; i < PRODUCT_INFO_SIZE; i++) {

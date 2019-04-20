@@ -51,17 +51,23 @@ struct regmap *__devm_rtk_regmap_init_mmio(struct device *dev,
 		dev, regs, config)
 
 /* secure mmio api */
-struct rtk_secure_regfield {
+enum {
+	SMCCC_FMT_CMD,
+	SMCCC_FMT_CMD_PHYS,
+};
+
+struct secure_register_desc {
 	u32 offset;
 	u32 wcmd;
 	u32 rcmd;
+	u32 fmt;
 };
 
 struct rtk_regmap_config {
-	struct regmap_config        config;
-	struct rtk_secure_regfield  *srfs;
-	u32                         num_srfs;
-	u32                         addr;
+	struct regmap_config config;
+	const struct secure_register_desc *descs;
+	u32 num_descs;
+	u32 addr;
 };
 
 struct regmap *__rtk_regmap_init_secure_mmio(struct device *dev,

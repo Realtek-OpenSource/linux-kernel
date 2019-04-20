@@ -491,9 +491,9 @@ int hdcp_lib_query_sink_hdcp_capable(void)
 {
 	uint8_t an_bksv_data[5];
 	int i;
-	int retry = 6;
+	int retry = 15;
 
-	/* HDCP CTS 1A-04: Continue to read the HDCP port for 9 seconds */
+	/* HDCP CTS 1A-04: Continue to read the HDCP port for 20 seconds */
 	for (i = 0; i < retry; i++) {
 		if (ddc_read(DDC_BKSV_LEN, DDC_BKSV_ADDR, an_bksv_data)) {
 			HDCP_ERROR("Read BKSV error %d time(s)", i);

@@ -469,6 +469,8 @@ static ssize_t wakeup_count_show(struct kobject *kobj,
 	unsigned int val;
 
 #ifdef CONFIG_RTK_PLATFORM
+
+#if 0
     if(pm_wakelock_mode == 1) {
         int count = 0;
         while(pm_block_wakelock == 1) {
@@ -479,6 +481,8 @@ static ssize_t wakeup_count_show(struct kobject *kobj,
         val = 0;
         return sprintf(buf,"%u\n",val);
     }
+#endif
+
 #endif /* CONFIG_RTK_PLATFORM */
 
 	return pm_get_wakeup_count(&val, true) ?
@@ -493,9 +497,13 @@ static ssize_t wakeup_count_store(struct kobject *kobj,
 	int error;
 
 #ifdef CONFIG_RTK_PLATFORM
+
+#if 0
 	if(pm_wakelock_mode == 1) {
 		return n;
 	}
+#endif
+
 #endif /* CONFIG_RTK_PLATFORM */
 
 	error = pm_autosleep_lock();

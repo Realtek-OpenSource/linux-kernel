@@ -57,12 +57,11 @@
 
 #define DRIVER_NAME "EMMC"
 #define BANNER      "Realtek eMMC Driver"
-#define VERSION     "$Id: rtkemmc.c Hank 2018-12-19 18:00 $"
+#define VERSION     "$Id: rtkemmc.c Hank 2019-1-7 19:00 $"
 
 #define DMA_ALLOC_LENGTH     (0x80000)
 #define DESC_ALLOC_LENGTH   (1024*1024)
 unsigned int GLOBAL=0;
-//#define EMMC_DEBUG
 #define PHASE_INHERITED
 
 #define FORCE_CHECK_CMD_AND_STS
@@ -88,6 +87,8 @@ static u32 dqs_saved = 0xff;
 static unsigned sd_reg = 0;
 #endif
 
+//#define RTKEMMC_DEBUG
+
 struct mmc_host * mmc_host_local = NULL;
 static u32 rtk_emmc_bus_wid = 0;
 static volatile struct backupRegs gRegTbl;
@@ -101,6 +102,7 @@ static struct rw_semaphore cr_rw_sem;
 //ip descriptor on ddr
 unsigned int* gddr_descriptor=NULL;
 static unsigned int* gddr_descriptor_org=NULL;
+
 //internal emmc dma buffer on ddr
 static unsigned char* gddr_dma=NULL;
 static unsigned char* gddr_dma_org=NULL;
@@ -138,7 +140,7 @@ int mmc_hs400_to_hs200(struct mmc_card *card);
 int mmc_select_hs200(struct mmc_card *card);
 int mmc_select_ddr50(struct mmc_card *card);
 int rtkemmc_switch(struct mmc_card *card, u8 acc_mod, u8 index, u8 value, u8 cmd_set);
-#ifdef EMMC_DEBUG
+#ifdef RTKEMMC_DEBUG
 static void rtkemmc_dump_registers(struct rtkemmc_host *emmc_port);
 #endif
 static void rtkemmc_request(struct mmc_host *host, struct mmc_request *mrq);
@@ -178,7 +180,7 @@ static void rtkemmc_dqs_tuning(struct mmc_host *host);
 int rtkemmc_select_timing(struct mmc_card *card);
 void rtkemmc_select_card_type(struct mmc_card *card);
 void down_speed_handling(struct rtkemmc_host *emmc_port);
-
+u32 rtkemmc_swap_endian(u32 input);
 DECLARE_COMPLETION(rtk_emmc_wait);
 typedef void (*set_gpio_func_t)(u32 gpio_num,u8 dir,u8 level);
 
@@ -217,6 +219,12 @@ static struct rtk_host_ops emmc_ops = {
 	.restore_regs   = NULL,
 };
 
+void sync(struct rtkemmc_host *emmc_port)
+{
+	dmb(sy);
+	writel(0x0, emmc_port->sb2_membase+0x20);
+	dmb(sy);
+}
 
 //---------------------------------------------------------------------------------------------------------------------------
 #ifdef CONFIG_RTK_ACPU_RELOAD
@@ -423,12 +431,669 @@ int mmc_fast_write(unsigned int blk_addr, unsigned int data_size, unsigned char 
 EXPORT_SYMBOL(mmc_fast_write);
 #endif
 //------------------------------------------------------------------------------------------------------------------------------
-void sync(struct rtkemmc_host *emmc_port)
+
+//----------------------------------------command queue related function---------- -------------------------------------------
+#ifdef CONFIG_MMC_RTK_EMMC_CMDQ
+
+static int rtkemmc_cmdq_enable(struct mmc_host *mmc);
+static int rtkemmc_cmdq_request(struct mmc_host *mmc, struct mmc_request *mrq);
+static int rtkemmc_cmdq_alloc_tdl(struct cmdq_host *cq_host);
+static void rtkemmc_cmdq_post_req(struct mmc_host *host, struct mmc_request *mrq, int err);
+static void rtkemmc_cmdq_disable(struct mmc_host *mmc, bool soft);
+static int rtkemmc_cmdq_halt(struct mmc_host *mmc, bool halt);
+
+static const struct mmc_cmdq_host_ops cmdq_host_ops = {
+	.enable = rtkemmc_cmdq_enable,
+	.disable = rtkemmc_cmdq_disable,
+	.request = rtkemmc_cmdq_request,
+	.post_req = rtkemmc_cmdq_post_req,
+	.halt = rtkemmc_cmdq_halt,
+};
+
+#define DRV_NAME "rtkemmc-cmdq-host"
+
+static void rtkemmc_cmdq_dumpregs(struct rtkemmc_host *emmc_port)
 {
-	dmb(sy);
-    	writel(0x0, emmc_port->sb2_membase+0x20);
-    	dmb(sy);
+	struct mmc_host *mmc = emmc_port->mmc;
+
+	pr_err(DRV_NAME ": ========== REGISTER DUMP (%s)==========\n",
+		mmc_hostname(mmc));
+
+	pr_err(DRV_NAME ": Queing config: 0x%08x | Queue Ctrl:  0x%08x\n",
+		readl(emmc_port->emmc_membase + EMMC_CQCFG),
+		readl(emmc_port->emmc_membase + EMMC_CQCTL));
+	pr_err(DRV_NAME ": Int stat: 0x%08x      | Int enab:  0x%08x\n",
+		readl(emmc_port->emmc_membase + EMMC_CQIS),
+		readl(emmc_port->emmc_membase + EMMC_CQIS_STAT_EN));
+	pr_err(DRV_NAME ": Int sig: 0x%08x       | Int Coal:  0x%08x\n",
+		readl(emmc_port->emmc_membase + EMMC_CQIS_SIGNAL_EN),
+		readl(emmc_port->emmc_membase + EMMC_CQIC));
+	pr_err(DRV_NAME ": TDL base: 0x%08x\n", readl(emmc_port->emmc_membase + EMMC_CQTDLBA));
+	pr_err(DRV_NAME ": Doorbell: 0x%08x      | Comp Notif:  0x%08x\n",
+		readl(emmc_port->emmc_membase + EMMC_CQTDBR),
+		readl(emmc_port->emmc_membase + EMMC_CQTCN));
+	pr_err(DRV_NAME ": Dev queue: 0x%08x     | Dev Pend:  0x%08x\n",
+		readl(emmc_port->emmc_membase + EMMC_CQDQS),
+		readl(emmc_port->emmc_membase + EMMC_CQDPT));
+	pr_err(DRV_NAME ": Task clr: 0x%08x      | Send stat 1:  0x%08x\n",
+		readl(emmc_port->emmc_membase + EMMC_CQTCLR),
+		readl(emmc_port->emmc_membase + EMMC_CQSSC1));
+	pr_err(DRV_NAME ": Send stat 2: 0x%08x   | DCMD resp:  0x%08x\n",
+		readl(emmc_port->emmc_membase + EMMC_CQSSC2),
+		readl(emmc_port->emmc_membase + EMMC_CQCRDCT));
+	pr_err(DRV_NAME ": Resp err mask: 0x%08x | Task err:  0x%08x\n",
+		readl(emmc_port->emmc_membase + EMMC_CQRMEM),
+		readl(emmc_port->emmc_membase + EMMC_CQTERRI));
+	pr_err(DRV_NAME ": Resp idx 0x%08x       | Resp arg:  0x%08x\n",
+		readl(emmc_port->emmc_membase + EMMC_CQCRI),
+		readl(emmc_port->emmc_membase + EMMC_CQCRA));
+	pr_err(DRV_NAME ": ===========================================\n");
 }
+
+static void rtkemmc_cmdq_post_req(struct mmc_host *host, struct mmc_request *mrq, int err)
+{
+	struct mmc_data *data = mrq->data;
+
+	if (data) {
+		data->error = err;
+		dma_unmap_sg(mmc_dev(host), data->sg, data->sg_len,
+			     (data->flags & MMC_DATA_READ) ?
+			     DMA_FROM_DEVICE : DMA_TO_DEVICE);
+		if (err)
+			data->bytes_xfered = 0;
+		else
+			data->bytes_xfered = blk_rq_bytes(mrq->req);
+	}
+}
+
+int rtkemmc_cmdq_init(struct cmdq_host *cq_host, struct mmc_host *mmc, bool dma64)
+{
+	int err = 0;
+
+	cq_host = kzalloc(sizeof(*cq_host), GFP_KERNEL);
+	if (!cq_host) {
+		printk(KERN_ERR "Allocate cq_host memory failed!!!\n");
+		return -ENOMEM;
+	}
+
+	cq_host->dma64 = dma64;
+	cq_host->mmc = mmc;
+	cq_host->mmc->cmdq_private = cq_host;
+
+#ifdef CONFIG_MMC_RTK_EMMC_PON
+	cq_host->start_slot = 1;	//slot 0 is reserved for pon usage
+#else
+	cq_host->start_slot = 0;
+#endif
+	cq_host->num_slots = NUM_SLOTS;
+	cq_host->dcmd_slot = DCMD_SLOT;
+
+	mmc->cmdq_ops = &cmdq_host_ops;
+
+	cq_host->mrq_slot = kzalloc(sizeof(cq_host->mrq_slot) *
+					cq_host->num_slots, GFP_KERNEL);
+	if (!cq_host->mrq_slot)
+		return -ENOMEM;
+
+	init_completion(&cq_host->halt_comp);
+	return err;
+}
+
+static int rtkemmc_cmdq_halt(struct mmc_host *mmc, bool halt)
+{
+	struct cmdq_host *cq_host = (struct cmdq_host *)mmc_cmdq_private(mmc);
+	struct rtkemmc_host *emmc_port = mmc_priv(mmc);
+	u32 val = 0;
+
+	if (halt) {
+		rtkemmc_writel(readl(emmc_port->emmc_membase+EMMC_CQCTL) | EMMC_CQ_HALT, emmc_port->emmc_membase+EMMC_CQCTL);
+		val = wait_for_completion_timeout(&cq_host->halt_comp, msecs_to_jiffies(HALT_TIMEOUT_MS));
+		/* halt done: re-enable legacy interrupts */
+		rtkemmc_writel(~EMMC_CQ_ALL_STAT_EN, emmc_port->emmc_membase+EMMC_CQIS_STAT_EN); //disable all cqe status interrupt bit
+		rtkemmc_writel(~EMMC_CQ_ALL_SIGNAL_EN, emmc_port->emmc_membase+EMMC_CQIS_SIGNAL_EN);        //disable all cqe signal interrupt bit
+
+		val = val ? 0 : -ETIMEDOUT;
+	} else {
+		rtkemmc_writel(EMMC_CQ_ALL_STAT_EN, emmc_port->emmc_membase+EMMC_CQIS_STAT_EN); //enable all cqe status interrupt bit
+		rtkemmc_writel(EMMC_CQ_ALL_SIGNAL_EN, emmc_port->emmc_membase+EMMC_CQIS_SIGNAL_EN);        //enable all cqe signal interrupt bit
+		rtkemmc_writel(readl(emmc_port->emmc_membase+EMMC_CQCTL) & (~EMMC_CQ_HALT), emmc_port->emmc_membase+EMMC_CQCTL);
+	}
+
+	return val;
+}
+
+static int rtkemmc_cmdq_enable(struct mmc_host *mmc)
+{
+	int err = 0;
+	u32 cqcfg;
+	struct cmdq_host *cq_host = mmc_cmdq_private(mmc);
+	struct rtkemmc_host *emmc_port = mmc_priv(mmc);
+
+	if (!cq_host || !mmc->card || !mmc_card_cmdq(mmc->card)) {
+		printk(KERN_ERR "cq_host or mmc->card is null!!!\n");
+		err = -EINVAL;
+		goto out;
+	}
+
+	if (cq_host->enabled) {
+		printk(KERN_ERR "cq_host->enabled flag 1, cqe has been already enabled!!!\n");
+		goto out;
+	}
+
+	cqcfg = readl(emmc_port->emmc_membase+EMMC_CQCFG);
+	if (cqcfg & EMMC_CQ_EN) {
+		printk(KERN_ERR "%s: %s: cq_host is already enabled\n", mmc_hostname(mmc), __func__);
+		WARN_ON(1);
+		goto out;
+	}
+
+	if (!cq_host->desc_base || !cq_host->trans_desc_base) {
+		//create the descriptor table, EMMC_CQTDLBA register will be filled out the descriptor address
+		err = rtkemmc_cmdq_alloc_tdl(cq_host);
+		if (err)
+			goto out;
+	}
+
+	rtkemmc_writeb(EMMC_SW_RST_DAT, emmc_port->emmc_membase+EMMC_SW_RST_R);		//clear data path SW_RST_R.SW_RST_DAT = 1
+	rtkemmc_writel(cq_host->desc_dma_base, emmc_port->emmc_membase+EMMC_CQTDLBA);		//0x980121a0, Set Task Descriptor List Base Address Register (CQTDLBA)
+	rtkemmc_writew(0x200, emmc_port->emmc_membase+EMMC_BLOCKSIZE_R); //0x98012004,Set value corresponding to executed data byte length of one block to BLOCKSIZE_R
+	rtkemmc_writew(((1<<EMMC_MULTI_BLK_SEL)|EMMC_BLOCK_COUNT_ENABLE|EMMC_DMA_ENABLE),emmc_port->emmc_membase+EMMC_XFER_MODE_R);	//0x9801200c
+	rtkemmc_writeb((readb(emmc_port->emmc_membase + EMMC_HOST_CTRL1_R)&0xe7)|(EMMC_ADMA2_32<<EMMC_DMA_SEL),
+			emmc_port->emmc_membase+EMMC_HOST_CTRL1_R);		//Set DMA_SEL to ADMA2 only mode in the HOST_CTRL1_R
+	rtkemmc_writew(0, emmc_port->emmc_membase+EMMC_BLOCKCOUNT_R);
+	rtkemmc_writel(0, emmc_port->emmc_membase+EMMC_SDMASA_R);	//Set SDMASA_R (while using 32 bits) to 0
+	//Set CQIC register to enable interrupt coalescing and to configure its timeout and threshold parameters INTC_TOUT, INTC_TH, disable by default
+	rtkemmc_writel(0, emmc_port->emmc_membase+EMMC_CQIC);
+	rtkemmc_writel(0, emmc_port->emmc_membase+EMMC_CQIS);	//Set CQIS status interrupt register to 0
+	rtkemmc_writel(EMMC_CQ_ALL_STAT_EN, emmc_port->emmc_membase+EMMC_CQIS_STAT_EN);	//enable all cqe status interrupt bit
+	rtkemmc_writel(EMMC_CQ_ALL_SIGNAL_EN, emmc_port->emmc_membase+EMMC_CQIS_SIGNAL_EN);        //enable all cqe signal interrupt bit
+	rtkemmc_writel(0x1000, emmc_port->emmc_membase+EMMC_CQSSC1);	//Set CQSSC1 register to configure device queue status fetch polling time and block count.
+	rtkemmc_writel(0x1, emmc_port->emmc_membase+EMMC_CQSSC2);	//Set CQSSC2 to configure RCA
+	rtkemmc_writel((cqcfg|EMMC_CQ_EN|EMMC_DCMD_EN), emmc_port->emmc_membase+EMMC_CQCFG);    //0x98012188, Set CQCFG register to configure DCMD_EN, TASK_DESC_SIZE and CQ_EN
+
+#if 1 //cmdq interrupt mode
+	rtkemmc_hold_int_dec();
+	rtkemmc_en_cqe_int();
+#endif
+
+	isb();
+	sync(emmc_port);
+
+	cq_host->enabled = true;
+
+out:
+	return err;
+}
+
+static void rtkemmc_cmdq_disable(struct mmc_host *mmc, bool soft)
+{
+	struct cmdq_host *cq_host = (struct cmdq_host *)mmc_cmdq_private(mmc);
+	struct rtkemmc_host *emmc_port = mmc_priv(mmc);
+
+        if (soft)
+                rtkemmc_writel(readl(emmc_port->emmc_membase+EMMC_CQCFG) & ~(EMMC_CQ_EN), emmc_port->emmc_membase+EMMC_CQCFG);
+        cq_host->enabled = false;
+}
+
+static int cmdq_dma_map(struct mmc_host *host, struct mmc_request *mrq)
+{
+	int sg_count;
+	struct mmc_data *data = mrq->data;
+
+	if (!data) {
+		printk(KERN_ERR "%s: mmc_data = NULL!!!\n", __func__);
+		return -EINVAL;
+	}
+
+	sg_count = dma_map_sg(mmc_dev(host), data->sg,
+			      data->sg_len,
+			      (data->flags & MMC_DATA_WRITE) ?
+			      DMA_TO_DEVICE : DMA_FROM_DEVICE);
+	if (!sg_count) {
+		pr_err("%s: sg-len: %d\n", __func__, data->sg_len);
+		return -ENOMEM;
+	}
+
+	return sg_count;
+}
+
+static inline u32 *get_desc(struct cmdq_host *cq_host, u8 tag)
+{
+	return cq_host->desc_base + (tag * cq_host->slot_sz / 4);
+}
+
+static inline u32 *get_link_desc(struct cmdq_host *cq_host, u8 tag)
+{
+	u32 *desc = get_desc(cq_host, tag);
+
+	return desc + cq_host->task_desc_len/4;
+}
+
+static inline dma_addr_t get_trans_desc_dma(struct cmdq_host *cq_host, u8 tag)
+{
+	return cq_host->trans_desc_dma_base +
+		(cq_host->mmc->max_segs * tag *
+		 cq_host->trans_desc_len);
+}
+
+static inline u32 *get_trans_desc(struct cmdq_host *cq_host, u8 tag)
+
+{
+	return cq_host->trans_desc_base +
+		(cq_host->trans_desc_len * cq_host->mmc->max_segs * tag / 4);
+}
+
+/* set the trans link structure value*/
+static void setup_link_desc(struct cmdq_host *cq_host, u8 tag)
+{
+	u32 *link_temp;
+	dma_addr_t trans_temp;
+
+	link_temp = get_link_desc(cq_host, tag);
+	trans_temp = get_trans_desc_dma(cq_host, tag);
+
+	memset(link_temp, 0, cq_host->link_desc_len);
+
+	if (tag == DCMD_SLOT) {
+		link_temp[1] = rtkemmc_swap_endian(VALID(0) | ACT(0) | END(1));
+#ifdef RTKEMMC_DEBUG
+		printk(KERN_INFO "%s: [DEBUG] link descriptor tag=%d, link[0]=0x%x, link[1]=0x%x\n", __func__, tag, link_temp[0], link_temp[1]);
+#endif
+		return;
+	}
+	//trans link [32:63] save the trans descriptor dma sddress
+	link_temp[0] = rtkemmc_swap_endian(trans_temp);
+	link_temp[1] = rtkemmc_swap_endian((VALID(1) | ACT(0x6) | END(0)));
+#ifdef RTKEMMC_DEBUG
+	printk(KERN_INFO "%s: [DEBUG] link descriptor tag=%d, link[0]=0x%x, link[1]=0x%x\n", __func__, tag, link_temp[0], link_temp[1]);
+#endif
+}
+/**
+ * The allocated descriptor table for task, link & transfer descritors
+ * looks like:
+ * |----------|
+ * |task desc |  |->|----------|
+ * |----------|  |  |trans desc|
+ * |link desc-|->|  |----------|
+ * |----------|          .
+ *      .                .
+ *  no. of slots      max-segs
+ *      .           |----------|
+ * |----------|
+ * The idea here is to create the [task+trans] table and mark & point the
+ * link desc to the transfer desc table on a per slot basis.
+ */
+static int rtkemmc_cmdq_alloc_tdl(struct cmdq_host *cq_host)
+{
+	size_t desc_size;
+	size_t data_size;
+	int i = 0;
+	//in realtek, we only support 32 bit ADMA2
+	cq_host->task_desc_len = 8;
+	cq_host->trans_desc_len = 8;
+	cq_host->link_desc_len = 8;
+
+	/* total size of a slot: 1 task & 1 transfer (link) */
+	cq_host->slot_sz = cq_host->task_desc_len + cq_host->link_desc_len;
+	desc_size = cq_host->slot_sz * cq_host->num_slots;
+
+	//dcmd does not need data buffer
+	data_size = cq_host->trans_desc_len * cq_host->mmc->max_segs *
+			(cq_host->num_slots - 1);
+#ifdef RTKEMMC_DEBUG
+	printk(KERN_INFO "%s: desc_size: %d data_sz: %d slot-sz: %d\n", __func__,
+                (int)desc_size, (int)data_size, cq_host->slot_sz);
+#endif
+	/*
+         * allocate a dma-mapped chunk of memory for the descriptors
+         * allocate a dma-mapped chunk of memory for link descriptors
+         * setup each link-desc memory offset per slot-number to
+         * the descriptor table.
+         */
+	cq_host->desc_base = dmam_alloc_coherent(mmc_dev(cq_host->mmc),
+                                                 desc_size,
+                                                 &cq_host->desc_dma_base,
+                                                 GFP_KERNEL);
+	cq_host->trans_desc_base = dmam_alloc_coherent(mmc_dev(cq_host->mmc),
+                                              data_size,
+                                              &cq_host->trans_desc_dma_base,
+                                              GFP_KERNEL);
+	if (!cq_host->desc_base || !cq_host->trans_desc_base)
+		return -ENOMEM;
+#ifdef RTKEMMC_DEBUG
+	printk(KERN_INFO "desc-base: 0x%p trans-base: 0x%p\n desc_dma 0x%llx trans_dma: 0x%llx\n",
+		cq_host->desc_base, cq_host->trans_desc_base,
+		(unsigned long long)cq_host->desc_dma_base,
+		(unsigned long long) cq_host->trans_desc_dma_base);
+#endif
+	for (i=0 ; i < (cq_host->num_slots); i++)
+		setup_link_desc(cq_host, i);
+
+	return 0;
+}
+
+static void make_cmdq_dcmd_des(u32 *des_base, struct mmc_request *mrq)
+{
+	u8 resp_type;
+	u8 timing;
+	u32 tmp_val;
+
+	if (!(mrq->cmd->flags & MMC_RSP_PRESENT)) {
+		resp_type = 0x0;
+		timing = 0x1;
+	} else {
+		if (mrq->cmd->flags & MMC_RSP_R1B) {
+			resp_type = 0x3;
+			timing = 0x0;
+		} else {
+			resp_type = 0x2;
+			timing = 0x1;
+		}
+	}
+	/*task[63:32], command argument */
+	des_base[0] = rtkemmc_swap_endian(mrq->cmd->arg);
+	/*task[31:0], resp type [24:23], cmd_idx[21:16] */
+	tmp_val = (VALID(1) |
+		   END(1) |
+		   INT(1) |
+		   QBAR(1) |
+		   ACT(0x5) |
+		   CMD_INDEX(mrq->cmd->opcode) |
+		   CMD_TIMING(timing) | RESP_TYPE(resp_type));
+	des_base[1] = rtkemmc_swap_endian(tmp_val);
+	/* tran[63:32], all 0 */
+	des_base[2] = 0;
+	/* tran[31:0], end[1] =1  */
+	des_base[3] = rtkemmc_swap_endian(3);	//end and valid bit
+#ifdef RTKEMMC_DEBUG
+	printk(KERN_INFO "%s: [DEBUG] DCMD TASK descriptor des_base[0]=0x%x, des_base[1]=0x%x, des_base[2]=0x%x, des_base[3]=0x%x\n",
+				__func__, des_base[0], des_base[1],des_base[2],des_base[3]);
+#endif
+}
+
+static void cmdq_set_tran_desc(u32 *desc,
+                                 dma_addr_t addr, int len, bool end)
+{
+	u32 tmp_val= (VALID(1) |
+                 END(end ? 1 : 0) |
+                 INT(0) |
+                 ACT(0x4) |
+                 DAT_LENGTH(len));
+
+	desc[0] = rtkemmc_swap_endian(addr);
+	desc[1] = rtkemmc_swap_endian(tmp_val);
+#ifdef RTKEMMC_DEBUG
+	printk(KERN_INFO "%s: [DEBUG] trans descriptor desc[0]=0x%x, desc[1]=0x%x, end=%d, len=%d, dma_addr=0x%x\n", __func__, desc[0], desc[1], end, len, addr);
+#endif
+}
+
+static void make_cmdq_rw_des(u32 *des_base, struct mmc_request *mrq, struct mmc_host *mmc, int tag)
+{
+	struct mmc_cmdq_req *cmdq_rq = mrq->cmdq_req;
+	struct cmdq_host *cq_host = (struct cmdq_host *)mmc_cmdq_private(mmc);
+	struct mmc_data *data = mrq->data;
+	struct rtkemmc_host *emmc_port;
+	emmc_port = mmc_priv(mmc);
+
+	unsigned int blk_cnt = cmdq_rq->data.blocks;	//total block
+	u32 blk_cnt2, remain_blk_cnt;
+	int blk_addr = cmdq_rq->blk_addr;
+	struct scatterlist *sg;
+	u8 read=1;
+	u32 *desc;
+	u32  dma_nents = 0;
+	u32  dma_leng = 0;
+	u32  dma_addr;
+	u32 tmp_val;
+	bool end = false;
+	int i=0;
+	u32 *link_temp;
+#ifdef RTKEMMC_DEBUG
+	printk(KERN_INFO "%s: blk_cnt=%d, blk_addr=%d\n", __func__, blk_cnt, blk_addr);
+#endif
+	if(mrq->cmdq_req->data.flags == MMC_DATA_READ) {
+#ifdef RTKEMMC_DEBUG
+		printk(KERN_INFO "[DEBUG] %s: MMC_DATA_READ\n", __func__);
+#endif
+		read = 1;
+	}
+	else {
+#ifdef RTKEMMC_DEBUG
+		printk(KERN_INFO "[DEBUG] %s: MMC_DATA_WRITE\n", __func__);
+#endif
+		read = 0;
+	}
+
+	dma_nents = cmdq_dma_map(mrq->host, mrq);
+
+	if (dma_nents < 0) {
+		pr_err("%s: %s: unable to map sg lists, %d\n",
+				mmc_hostname(mrq->host), __func__, dma_nents);
+		return;
+	}
+	//fill out the transfer descriptor
+	desc = get_trans_desc(cq_host, tag);
+	memset(desc, 0, cq_host->trans_desc_len * cq_host->mmc->max_segs);
+
+	for_each_sg(data->sg, sg, dma_nents, i) {
+		dma_addr = sg_dma_address(sg);
+		dma_leng = sg_dma_len(sg);
+		remain_blk_cnt  = dma_leng >> 9;;
+
+		while(remain_blk_cnt) {
+			if(remain_blk_cnt > EMMC_MAX_SCRIPT_BLK)
+				blk_cnt2 = EMMC_MAX_SCRIPT_BLK;
+			else
+				blk_cnt2 = remain_blk_cnt;
+
+			if (((i+1) == dma_nents) && (remain_blk_cnt == blk_cnt2))
+				end = true;
+
+			cmdq_set_tran_desc(desc, dma_addr, (blk_cnt2<<9), end);
+
+			dma_addr = dma_addr+(blk_cnt2<<9);
+			remain_blk_cnt -= blk_cnt2;
+			desc += (cq_host->trans_desc_len/4);
+
+			isb();
+			sync(emmc_port);
+		}
+	}
+#ifdef RTKEMMC_DEBUG
+        printk(KERN_INFO "%s: req: 0x%p tag: %d calc_trans_des: 0x%p sg-cnt: %d\n",
+                __func__, mrq->req, tag, desc, dma_nents);
+#endif
+	//fill out the task descriptor
+	/*task[63:32], block address */
+	des_base[0] = rtkemmc_swap_endian(blk_addr);
+	/*task[31:0], block count[31:16], task parameter[15:6], attribute[5:0] */
+	tmp_val = VALID(1) |
+		  END(1) |
+		  INT(1) |
+		  ACT(0x5) |
+		  (read <<12) |
+		  BLK_COUNT(blk_cnt);
+	des_base[1] = rtkemmc_swap_endian(tmp_val);
+
+	isb();
+	sync(emmc_port);
+	wmb();
+	sync(emmc_port);
+	/* tran[63:32], setting des2; Physical address to DMA to/from */
+	//link descriptor part is set in setup_link_desc() function
+
+	link_temp = get_link_desc(cq_host, tag);
+#ifdef RTKEMMC_DEBUG
+	printk(KERN_INFO "%s: [DEBUG] task and link descriptor  tag=%d, des_base[0]=0x%x, des_base[1]=0x%x, link[0]=0x%x, link[1]=0x%x\n",
+				__func__, tag, des_base[0], des_base[1], link_temp[0], link_temp[1]);
+#endif
+}
+
+static void rtkemmc_cmdq_finish_data(struct mmc_host *mmc, unsigned int tag)
+{
+        struct mmc_request *mrq;
+        struct cmdq_host *cq_host = (struct cmdq_host *)mmc_cmdq_private(mmc);
+#ifdef RTKEMMC_DEBUG
+	printk(KERN_INFO "[DEBUG] %s, tag=%d\n",__func__, tag);
+#endif
+        mrq = cq_host->mrq_slot[tag];
+        mrq->done(mrq);
+}
+
+static int SD_Stream_cmdq_Cmd(struct mmc_host *mmc, struct mmc_request *mrq, u32 tag)
+{
+	int err = 0;
+	int cmdq_idx_start = 0;
+	struct rtkemmc_host *emmc_port;
+	struct cmdq_host *cq_host = (struct cmdq_host *)mmc_cmdq_private(mmc);
+	int j;
+#ifdef RTKEMMC_DEBUG
+	printk(KERN_ERR "[DEBUG] %s, tag=%d\n", __func__, tag);
+#endif
+	emmc_port = mmc_priv(mmc);
+
+	if((readl(emmc_port->emmc_membase+0x80c)&0x1)==1)
+		cmdq_idx_start = 1;	//we reserve cmdq slot 0 for pon
+	else
+		cmdq_idx_start = 0;
+
+	for(j=0; j<0x80; j++){	//we try 128 times
+		if((readl(emmc_port->emmc_membase+EMMC_CQTDBR)&(1<<tag))==0){
+//			printk(KERN_ERR "queue status = 0x%x\n", readl(emmc_port->emmc_membase+EMMC_CQTDBR));
+			make_cmdq_rw_des((u32*)cq_host->desc_base+tag*0x4, mrq, mmc, tag);
+			cq_host->mrq_slot[tag] = mrq;
+			rtkemmc_writel(1<<tag, emmc_port->emmc_membase+EMMC_CQTDBR);
+#ifdef RTKEMMC_DEBUG
+			printk(KERN_ERR "[DEBUG] cpuid=%d, rtkemmc write EMMC_CQTDBR bit %d, EMMC_CQTDBR=0x%x\n",
+				raw_smp_processor_id(), tag, readl(emmc_port->emmc_membase+EMMC_CQTDBR));
+#endif
+			j=0xff;
+			break;
+		}
+		else{
+			printk("read/write slot %d is occupied %d times\n", tag, j);
+			usleep_range(10, 30);
+		}
+	}
+#if 0
+	//cmdq polling mode
+	while(1) {
+		sync(emmc_port);
+		if((readl(emmc_port->emmc_membase+EMMC_CQTCN)&(1<<tag))!=0 && (readw(emmc_port->emmc_membase+EMMC_NORMAL_INT_STAT_R)&(1<<14))!=0) {
+			printk(KERN_ERR "[DEBUG] %s: task complete, EMMC_CQTCN=0x%x, EMMC_NORMAL_INT_STAT_R=0x%x, EMMC_ERROR_INT_STAT_R=0x%x\n",
+					 __func__,readl(emmc_port->emmc_membase+EMMC_CQTCN), readw(emmc_port->emmc_membase+EMMC_NORMAL_INT_STAT_R), readw(emmc_port->emmc_membase+EMMC_ERROR_INT_STAT_R));
+			rtkemmc_writel(readl(emmc_port->emmc_membase+EMMC_CQTCN), emmc_port->emmc_membase+EMMC_CQTCN);
+			rtkemmc_writel(readl(emmc_port->emmc_membase+ EMMC_CQIS), emmc_port->emmc_membase+ EMMC_CQIS);
+			rtkemmc_writel(readw(emmc_port->emmc_membase+EMMC_NORMAL_INT_STAT_R), emmc_port->emmc_membase+EMMC_NORMAL_INT_STAT_R);
+			rtkemmc_cmdq_finish_data(mmc, tag);
+			break;
+		}else {
+			printk(KERN_ERR "[DEBUG] %s: task doesn't complete, EMMC_CQTCN=0x%x, EMMC_NORMAL_INT_STAT_R=0x%x, EMMC_ERROR_INT_STAT_R=0x%x\n",
+					__func__,readl(emmc_port->emmc_membase+EMMC_CQTCN), readw(emmc_port->emmc_membase+EMMC_NORMAL_INT_STAT_R), readw(emmc_port->emmc_membase+EMMC_ERROR_INT_STAT_R));
+
+			usleep_range(10, 30);
+		}
+	}
+#endif
+	if(j==0x80){
+		printk("cmdq fail\n");
+		return 0xff;
+	}
+
+	return err;
+}
+
+static int SD_SendCMDGetRSP_cmdq_Cmd(struct mmc_host *mmc, struct mmc_request *mrq, u32 tag)
+{
+	int err = RTK_SUCC;
+	struct rtkemmc_host *emmc_port;
+	struct cmdq_host *cq_host = (struct cmdq_host *)mmc_cmdq_private(mmc);
+	int i=0;
+#ifdef RTKEMMC_DEBUG
+	printk(KERN_ERR "[DEBUG] %s, DCMD: mrq->cmd->opcode=%d, tag=%d\n", __func__, mrq->cmd->opcode, tag);
+#endif
+	emmc_port = mmc_priv(mmc);
+
+	for(i=0; i<0x80; i++){
+		if((readl(emmc_port->emmc_membase+EMMC_CQTDBR)&(1<<DCMD_SLOT))==0){
+			make_cmdq_dcmd_des((u32*)cq_host->desc_base+DCMD_SLOT*4, mrq);
+			cq_host->mrq_slot[DCMD_SLOT] = mrq;
+			rtkemmc_writel(1<<DCMD_SLOT,emmc_port->emmc_membase+EMMC_CQTDBR);
+			break;
+		}
+		else{
+			printk(KERN_ERR "dcmd slot 31 is occupied %d times\n", i);
+                        usleep_range(10, 30);
+		}
+	}
+
+	if(i==0x80){
+		printk(KERN_ERR "%s: DCMD fail \n", __func__);
+		err = RTK_FAIL;
+	}
+
+	return err;
+}
+
+static int rtkemmc_cmdq_request(struct mmc_host *mmc, struct mmc_request *mrq)
+{
+
+	int err=-1;
+	struct cmdq_host *cq_host = (struct cmdq_host *)mmc_cmdq_private(mmc);
+	u32 tag = mrq->cmdq_req->tag + cq_host->start_slot;	//if we enable the pon, slot 0 is reserved for PON
+
+#ifdef CONFIG_MMC_RTK_EMMC_PON
+	struct rtkemmc_host *emmc_port = mmc_priv(mmc);;
+	int i=0, retry_cnt=0;
+#endif
+
+	if (!cq_host->enabled) {
+		pr_err("%s: CMDQ host not enabled yet !!!\n",
+			mmc_hostname(mmc));
+		err = -EINVAL;
+		goto out;
+	}
+	if (mrq->cmdq_req->cmdq_req_flags & DCMD) {
+		tag = DCMD_SLOT;	//remap the block IO request tage to cmdq slot tag
+		err = SD_SendCMDGetRSP_cmdq_Cmd(mmc, mrq, tag);
+	}
+	else {
+#ifdef CONFIG_MMC_RTK_EMMC_PON
+		/*our strategy is to add 1 onto tag to make sure slot 0 is for pon usage only.
+		  However, if the orignal tage is 30, and add 1 is 31, this slot is for dcmd usage
+		  therefore, we need to re-find an available cmdq slot for this command request
+		*/
+		if(tag==31) {
+retry:
+			if(retry_cnt==10) {
+				goto out;
+			}
+			else retry_cnt++;
+
+			for(i=cq_host->start_slot; i<31; i++) {	//in this for loop, the i initial value should be 1
+				if((readl(emmc_port->emmc_membase+EMMC_CQTDBR)&(1<<i))==0)
+				{
+					tag = i;	//remap the block IO request tage to cmdq slot tag
+					break;
+				}
+			}
+			if(i==31) {
+				printk(KERN_ERR "%s: No available cmdq slot for this command request...\n", __func__);
+				usleep_range(5000, 10000);
+				goto retry;
+			}
+#ifdef RTKEMMC_DEBUG
+			printk(KERN_ERR "[DEBUG] %s: cmdq slot 31 is for dcmd, search for a new tag %d for this data command request %d times\n", __func__, tag, retry_cnt);
+#endif
+		}
+#endif
+		err = SD_Stream_cmdq_Cmd(mmc, mrq, tag);
+	}
+out:
+	return err;
+}
+#endif
+//-------------------------------------------------------------------------------------------------------------------------------
 
 static int rtkemmc_get_ro(struct mmc_host *mmc)
 {
@@ -443,7 +1108,7 @@ void pon_initial(struct rtkemmc_host *emmc_port, u32 start_addr, u32 end_addr, u
 	rtkemmc_writel(end_addr, emmc_port->emmc_membase + 0x804); // block end address
 	rtkemmc_writel(0x0a000005, emmc_port->emmc_membase + 0x808); // blcok count and dma length
 	rtkemmc_writel(id, emmc_port->emmc_membase + 0x810); // flash ID
-	rtkemmc_writel(0x4|cmdq, emmc_port->emmc_membase + 0x80c);                              // data invert +cmdq enable
+	rtkemmc_writel(0x4|0x8|cmdq, emmc_port->emmc_membase + 0x80c);                              // data invert +cmdq enable
 }
 #endif
 
@@ -819,7 +1484,7 @@ int rtkemmc_send_cmd18(struct rtkemmc_host *emmc_port, int size, unsigned long a
 		__FILE__, __func__, __LINE__, cmd_info.cmd->opcode, cmd_info.cmd->opcode, cmd_info.cmd->flags, host, host->card);
 	ret_err = SD_Stream_Cmd(EMMC_AUTOREAD1, &cmd_info, 1);
 	if (ret_err) {
-#ifdef EMMC_DEBUG
+#if 0
 		printk(KERN_ERR "Tuning rx cmd 18 err: size=%d, EMMC_RINTSTS=0x%x, EMMC_STATUS=0x%x\n",
 				size, readl(emmc_port->emmc_membase + EMMC_RINTSTS),readl(emmc_port->emmc_membase + EMMC_STATUS));
 #endif
@@ -914,7 +1579,7 @@ int rtkemmc_send_cmd25(struct rtkemmc_host *emmc_port,int size, unsigned long ad
         ret_err = SD_Stream_Cmd(EMMC_AUTOWRITE1, &cmd_info, 1);
         if (ret_err)
         {
-#ifdef EMMC_DEBUG
+#if 0
 		printk(KERN_ERR "Tuning tx cmd 25 err: size=%d, EMMC_RINTSTS=0x%x, EMMC_STATUS=0x%x\n",
 			size, readl(emmc_port->emmc_membase + EMMC_RINTSTS),readl(emmc_port->emmc_membase + EMMC_STATUS));
 #endif
@@ -1230,7 +1895,7 @@ static int mmc_Tuning_SDR50(struct rtkemmc_host *emmc_port)
 		gCurrentBootMode = MODE_SDR;
 	MMCPRINTF("[LY]sdr gCurrentBootMode =%d\n",gCurrentBootMode);
 
-	rtkemmc_set_freq(emmc_port, 0x57, 0x0); //100Mhz
+	rtkemmc_set_freq(emmc_port, 0x57, 0x1); //50Mhz
 
 	if (pddrive_nf_s0[0] != 0 )
 		rtkemmc_set_pad_driving(emmc_port, pddrive_nf_s0[1], pddrive_nf_s0[2], pddrive_nf_s0[3], pddrive_nf_s0[4]);
@@ -1251,7 +1916,7 @@ static int mmc_Tuning_DDR50(struct rtkemmc_host *emmc_port, u32 mode)
 		gCurrentBootMode = MODE_DDR;
 	MMCPRINTF("[LY]sdr gCurrentBootMode =%d\n",gCurrentBootMode);
 
-	rtkemmc_set_freq(emmc_port, 0x57, 0x0);  //100MMhz
+	rtkemmc_set_freq(emmc_port, 0x57, 0x1);  //50MMhz
 	sync(emmc_port);
 	udelay(100);
 	if (pddrive_nf_s1[0] != 0 )
@@ -1495,7 +2160,7 @@ retry:
 			max = j;
 		if(j==0 && max!=0)	//find the max tap length
 			break;
-#ifdef EMMC_DEBUG
+#ifdef RTKEMMC_DEBUG
 		printk(KERN_ERR "DQS windows tuning: i=0x%x\n",i<<1);
 #endif
 		writel(0x80|(i<<1),emmc_port->emmc_membase + EMMC_DQS_CTRL1);
@@ -1612,11 +2277,11 @@ static void rtkemmc_set_ios(struct mmc_host *host, struct mmc_ios *ios)
 			rtkemmc_writew((readw(emmc_port->emmc_membase + EMMC_HOST_CTRL2_R)&0xfff8)|MODE_HS200 ,emmc_port->emmc_membase + EMMC_HOST_CTRL2_R);
 			break;
 		case MMC_TIMING_MMC_DDR52:
-			rtkemmc_set_freq(emmc_port,0x57, 0x0);  //100MB
+			rtkemmc_set_freq(emmc_port,0x57, 0x1);  //50MB
 			rtkemmc_writew((readw(emmc_port->emmc_membase + EMMC_HOST_CTRL2_R)&0xfff8)|MODE_DDR ,emmc_port->emmc_membase + EMMC_HOST_CTRL2_R);
 			break;
 		case MMC_TIMING_MMC_HS:
-			rtkemmc_set_freq(emmc_port,0x57, 0x0);  //100Mhz
+			rtkemmc_set_freq(emmc_port,0x57, 0x1);  //50Mhz
 			rtkemmc_writew((readw(emmc_port->emmc_membase + EMMC_HOST_CTRL2_R)&0xfff8)|MODE_SDR ,emmc_port->emmc_membase + EMMC_HOST_CTRL2_R);
 			break;
 		case MMC_TIMING_LEGACY:
@@ -1743,6 +2408,7 @@ static int rtkemmc_free_dma_buf(struct rtkemmc_host *emmc_port)
 	if (gddr_dma_org)
 		dma_free_coherent(emmc_port->dev, DMA_ALLOC_LENGTH, gddr_dma_org ,emmc_port->dma_paddr);
 	MMCPRINTF("free rtk dma buf \n");
+
 	return 1;
 }
 
@@ -1923,7 +2589,7 @@ void phase(struct rtkemmc_host *emmc_port, u32 VP0, u32 VP1)
                 rtkemmc_writel((readl(emmc_port->emmc_membase + EMMC_CKGEN_CTL)&0xfff8ffff),emmc_port->emmc_membase + EMMC_CKGEN_CTL);  //change clock to PLL
 		sync(emmc_port);
 	}
-#ifdef EMMC_DEBUG
+#ifdef RTKEMMC_DEBUG
 	printk(KERN_ERR "%s: phase adjust - EMMC_CKGEN_CTL=0x%08x, PLL_EMMC1=%08x, PLL_EMMC2=%08x, PLL_EMMC3=%08x, PLL_EMMC4=%08x\n",
 		DRIVER_NAME,
 		readl(emmc_port->emmc_membase + EMMC_CKGEN_CTL),
@@ -1940,11 +2606,11 @@ static void rtkemmc_set_freq(struct rtkemmc_host *emmc_port, u32 freq, u32 div_i
 	unsigned long flags;
 
 	spin_lock_irqsave(&emmc_port->lock,flags);
-
+#if 0
 	clk_disable_unprepare(clk_en_emmc_ip);
 	isb();
 	sync(emmc_port);
-
+#endif
 	tmp_val = (readl(emmc_port->crt_membase + SYS_PLL_EMMC4) & 0x06);
 	rtkemmc_writel(tmp_val, emmc_port->crt_membase + SYS_PLL_EMMC4);
 	isb();
@@ -1959,7 +2625,7 @@ static void rtkemmc_set_freq(struct rtkemmc_host *emmc_port, u32 freq, u32 div_i
 	rtkemmc_writel(tmp_val, emmc_port->crt_membase + SYS_PLL_EMMC4);
 	isb();
 	sync(emmc_port);
-
+#if 0
 	clk_prepare_enable(clk_en_emmc_ip);
 	isb();
 	sync(emmc_port);
@@ -1967,7 +2633,13 @@ static void rtkemmc_set_freq(struct rtkemmc_host *emmc_port, u32 freq, u32 div_i
 	udelay(100);
         rtkemmc_writel(readl(emmc_port->emmc_membase+EMMC_CKGEN_CTL) & 0xffff, emmc_port->emmc_membase+EMMC_CKGEN_CTL); //change to PLL
         sync(emmc_port);
-        rtkemmc_writel(0x100|div_ip, emmc_port->emmc_membase+EMMC_CKGEN_CTL); //2N divider
+#endif
+
+	rtkemmc_writel(0, emmc_port->emmc_membase+EMMC_CKGEN_CTL); //reset to the initial value
+	if(div_ip!=0) {
+		rtkemmc_writel(div_ip, emmc_port->emmc_membase+EMMC_CKGEN_CTL); //2N divider
+		rtkemmc_writel((readl(emmc_port->emmc_membase+EMMC_CKGEN_CTL)|0x100), emmc_port->emmc_membase+EMMC_CKGEN_CTL); //set the enable bit
+	}
         sync(emmc_port);
 	printk(KERN_ERR "%s: emmc_port->emmc_membase+EMMC_CKGEN_CTL = 0x%x\n",__func__, readl(emmc_port->emmc_membase+EMMC_CKGEN_CTL));
 	spin_unlock_irqrestore(&emmc_port->lock, flags);
@@ -2054,15 +2726,83 @@ static irqreturn_t rtkemmc_irq(int irq, void *dev)
 {
 	struct rtkemmc_host *emmc_port = dev;
 	int irq_handled = 0;
+
 	rtkemmc_get_int_sta(&emmc_port->normal_interrupt, &emmc_port->error_interrupt);
 	sync(emmc_port);
 
-#if 1
-	printk(KERN_ERR "cmd_idx=%d, normal_interrupt =%08x, error_interrupt=0x%08x\n", emmc_port->cmd_opcode, emmc_port->normal_interrupt, emmc_port->error_interrupt);
+#ifdef CONFIG_MMC_RTK_EMMC_CMDQ
+	struct cmdq_host *cq_host = (struct cmdq_host *)mmc_cmdq_private(emmc_port->mmc);
 #endif
 
+#ifdef CONFIG_MMC_RTK_EMMC_CMDQ
+	if(cq_host->enabled==false)	//in command queue mode, this flag will be set after cmdq mode enable
+		rtkemmc_hold_int_dec();
+#else
 	rtkemmc_hold_int_dec();
-	MMCPRINTF("we get int end \n");
+#endif
+
+#ifdef CONFIG_MMC_RTK_EMMC_CMDQ
+	if(cq_host->enabled) {	//if we run the cmdq mode currently
+		u32 status;
+		unsigned long comp_status;
+#ifdef CONFIG_MMC_RTK_EMMC_PON
+		unsigned long tag = 1;	//tag 0 is reserved for pon
+#else
+		unsigned long tag = 0;
+#endif
+		status = readl(emmc_port->emmc_membase+ EMMC_CQIS);
+
+		if (status & EMMC_CQIS_TCC) {
+			/* read QCTCN and complete the request */
+			comp_status = readl(emmc_port->emmc_membase+EMMC_CQTCN);
+#ifdef RTKEMMC_DEBUG
+			printk(KERN_ERR "%s_cmdq: cpuid=%d, normal_interrupt =%08x, error_interrupt=0x%08x, EMMC_CQIS=0x%x, EMMC_CQTCN=0x%x\n",
+				__func__, raw_smp_processor_id(), emmc_port->normal_interrupt, emmc_port->error_interrupt, status, comp_status);
+#endif
+			if (!comp_status)
+				goto out;
+
+			for_each_set_bit(tag, &comp_status, cq_host->num_slots) {
+#ifdef RTKEMMC_DEBUG
+				/* complete the corresponding mrq */
+				printk(KERN_ERR "%s_cmdq: cpuid=%d, completing tag -> %lu\n", __func__, raw_smp_processor_id(), tag);
+#endif
+				rtkemmc_cmdq_finish_data(emmc_port->mmc, tag);
+			}
+			rtkemmc_writel(comp_status, emmc_port->emmc_membase+EMMC_CQTCN);
+			rtkemmc_writel(status, emmc_port->emmc_membase+ EMMC_CQIS);
+			rtkemmc_clr_int_sta();	//clear 0x2030 status
+		}
+
+		if (status & EMMC_CQIS_RED) {
+			/* task response has an error */
+			printk(KERN_ERR "%s: RED error %d !!!\n", mmc_hostname(emmc_port->mmc), status);
+			rtkemmc_writel(status, emmc_port->emmc_membase+ EMMC_CQIS);
+			rtkemmc_clr_int_sta();  //clear 0x2030 status
+			rtkemmc_cmdq_dumpregs(emmc_port);
+		}
+
+		if (status & EMMC_CQIS_HAC) {
+#ifdef RTKEMMC_DEBUG
+			printk(KERN_ERR "%s: halt irq case\n", __func__);
+			printk(KERN_ERR "%s_cmdq: cpuid=%d, normal_interrupt =%08x, error_interrupt=0x%08x, EMMC_CQIS=0x%x\n",
+                                __func__, raw_smp_processor_id(), emmc_port->normal_interrupt, emmc_port->error_interrupt, status);
+#endif
+			/* halt is completed, wakeup waiting thread */
+			rtkemmc_writel(status, emmc_port->emmc_membase+ EMMC_CQIS);
+			rtkemmc_clr_int_sta();  //clear 0x2030 status
+			complete(&cq_host->halt_comp);
+		}
+
+out:
+		return IRQ_HANDLED;
+	}
+#endif
+
+#ifdef RTKEMMC_DEBUG
+	printk(KERN_ERR "%s_legacy: cpuid=%d, cmd_idx=%d, normal_interrupt =%08x, error_interrupt=0x%08x\n",
+			__func__, raw_smp_processor_id(), emmc_port->cmd_opcode, emmc_port->normal_interrupt, emmc_port->error_interrupt);
+#endif
 
 	if(emmc_port->int_waiting) {
 		MMCPRINTF("int wait clear 1\n");
@@ -2166,6 +2906,10 @@ static void rtkemmc_chk_card_insert(struct rtkemmc_host *emmc_port)
                         emmc_port->emmc_membase + EMMC_HOST_CTRL1_R);   //ADMA2 32 bit select
 	isb();
         sync(emmc_port);
+
+	rtkemmc_writeb((readb(emmc_port->emmc_membase + EMMC_MSHC_CTRL_R) & (~EMMC_CMD_CONFLICT_CHECK)), emmc_port->emmc_membase + EMMC_MSHC_CTRL_R);	//disable emmc cmd conflict checkout
+	isb();
+	sync(emmc_port);
 
 	rtkemmc_writel(0x1, emmc_port->m2tmx_membase+EMMC_NAND_DMA_SEL);	// #sram_ctrl, 0 for nf, 1 for emmc
         isb();
@@ -2428,7 +3172,7 @@ void down_speed_handling(struct rtkemmc_host *emmc_port)
 		rtkemmc_select_card_type(mmc->card);	//do not set the emmc card capability as HS200
 		rtkemmc_select_timing(mmc->card);	//send cmd 6 again to inform the host SDR50 mode and set the correct bus speed mode
 
-		rtkemmc_set_freq(emmc_port, 0x57, 0x0); //100Mhz
+		rtkemmc_set_freq(emmc_port, 0x57, 0x1); //50Mhz
 
 		rtkemmc_set_pad_driving(emmc_port,0x0, 0x0, 0x0, 0x0);
 
@@ -2547,7 +3291,6 @@ static int rtkemmc_wait_opt_end(char* drv_name, struct rtkemmc_host *emmc_port,u
 		reg_argu = readl(emmc_port->emmc_membase+EMMC_ARGUMENT_R);
 		rtkemmc_writew(cmd_idx,emmc_port->emmc_membase+EMMC_CMD_R);
 		reg_cmdidx = readw(emmc_port->emmc_membase+EMMC_CMD_R);
-		
 		spin_unlock_irqrestore(&emmc_port->lock,flags);
 		wait_for_completion(emmc_port->int_waiting);
 
@@ -2901,7 +3644,6 @@ static int SD_Stream_Cmd(u16 cmdcode,struct sd_cmd_pkt *cmd_info, unsigned int b
 
 	if(rsp == NULL)
 		BUG_ON(1);
-
 	wait_done_timeout(emmc_port, (u32*)(emmc_port->emmc_membase + EMMC_PSTATE_REG), 0x3, 0x0,__func__);
 #ifdef TEST_POWER_RESCYCLE
 	cmd_info->emmc_port->test_count++;
@@ -3022,7 +3764,7 @@ int polling_to_tran_state(struct rtkemmc_host *emmc_port, int cmd_idx, int bIgno
 	sync(emmc_port);
 
 	if ((err)||(ret_state != STATE_TRAN)) {
-#ifdef EMMC_DEBUG
+#ifdef RTKEMMC_DEBUG
 		printk("--- cmd13 fail or ret_state not tran : 0x%08x---\n", ret_state);
 #endif
 //		if ((cmd_idx != MMC_READ_SINGLE_BLOCK)&&(cmd_idx != MMC_WRITE_BLOCK))
@@ -3208,6 +3950,7 @@ ERR_HANDLE:
 
 	if(err)
 		cmd_info->cmd->arg = old_arg;
+
 
 	dma_unmap_sg( mmc_dev(host), cmd_info->data->sg, cmd_info->data->sg_len, dir);
 	return err;
@@ -3472,7 +4215,10 @@ static void rtkemmc_request(struct mmc_host *host, struct mmc_request *mrq)
 #if defined(CONFIG_MMC_RTK_EMMC_PON) && !defined(CONFIG_MMC_RTK_EMMC_CMDQ)
 	while(1) {
 		if(readl(emmc_port->emmc_membase+0x900)==1) break;
-		else usleep_range(10, 30);
+		else {
+			printk(KERN_INFO "%s: Pon is occupying the semaphore and eMMC needs to wait for it.\n", __func__);
+			usleep_range(70, 150);
+		}
 	}
 #endif
 	if(mrq->cmd->opcode==MMC_SEND_EXT_CSD)
@@ -3735,6 +4481,9 @@ static int rtkemmc_probe(struct platform_device *pdev)
 		printk(KERN_INFO "[%s] No emmc tuning offset node, using MBR format !! \n",__func__);
 	}
 
+#if defined(CONFIG_MMC_RTK_EMMC_CMDQ)
+	rtkemmc_cmdq_init(emmc_port->cq_host, mmc, 0);  //allocate cq_host and realtek always uses ADMA 32 bit address
+#endif
 	rstc_emmc = devm_reset_control_get(&pdev->dev, NULL);
 	if (IS_ERR(rstc_emmc)) {
 		printk(KERN_WARNING "%s: reset_control_get() returns %ld\n", __func__,
@@ -3796,13 +4545,16 @@ static int rtkemmc_probe(struct platform_device *pdev)
 	if(rtk_emmc_bus_wid == 4 || rtk_emmc_bus_wid == 5)
 		mmc->caps &= ~MMC_CAP_8_BIT_DATA;
 
+#if defined(CONFIG_MMC_RTK_EMMC_CMDQ)
+	mmc->caps2 |= MMC_CAP2_CMD_QUEUE;
+#endif
 	mmc->caps2 |= MMC_CAP2_HC_ERASE_SZ;
 	mmc->f_min = 300000;        //300K
 	mmc->f_max = 400000000; //400M
 #ifdef CONFIG_RTK_XEN_SUPPORT
 	mmc->max_segs = 1;
 #else
-	mmc->max_segs = 256;
+	mmc->max_segs = 128;	//the max number of nodes in the scatterlist
 #endif
 	mmc->max_blk_size   = 512;
 #ifdef CONFIG_RTK_XEN_SUPPORT
@@ -3849,7 +4601,11 @@ static int rtkemmc_probe(struct platform_device *pdev)
 	emmc_port->ops->chk_card_insert(emmc_port);
 
 #ifdef CONFIG_MMC_RTK_EMMC_PON	//we just write the fix value for fpga test, we will read the input from device tree after negotiate with android team later
-	pon_initial(emmc_port, 0x1000000, 0x1000000+((256*2*1024)/4*5),0x00232223, 0);	//currently, we disable command queue first, offset = 256x1024x1024/512/2048x512x5
+#ifdef CONFIG_MMC_RTK_EMMC_CMDQ
+	pon_initial(emmc_port, 0xca0000, 0xca0000+((256*2*1024)/4*5),0x00232223, 1);
+#else
+	pon_initial(emmc_port, 0xca0000, 0xca0000+((256*2*1024)/4*5),0x00232223, 0);	//currently, we disable command queue first, offset = 256x1024x1024/512/2048x512x5
+#endif
 #endif
 
 	platform_set_drvdata(pdev, mmc);

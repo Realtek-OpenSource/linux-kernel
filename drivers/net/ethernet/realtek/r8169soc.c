@@ -69,6 +69,7 @@
 
 #if defined(CONFIG_ARCH_RTD16xx)
 #define RTL_TX_NO_CLOSE
+#define RTL_ADJUST_FIFO_THRESHOLD
 #endif /* CONFIG_ARCH_RTD16xx */
 
 #define FIRMWARE_8168D_1	"rtl_nic/rtl8168d-1.fw"
@@ -474,8 +475,12 @@ enum rtl8168_registers {
 #define ERIAR_ASF			(0x02 << ERIAR_TYPE_SHIFT)
 #define ERIAR_MASK_SHIFT		12
 #define ERIAR_MASK_0001			(0x1 << ERIAR_MASK_SHIFT)
+#define ERIAR_MASK_0010			(0x2 << ERIAR_MASK_SHIFT)
 #define ERIAR_MASK_0011			(0x3 << ERIAR_MASK_SHIFT)
+#define ERIAR_MASK_0100			(0x4 << ERIAR_MASK_SHIFT)
 #define ERIAR_MASK_0101			(0x5 << ERIAR_MASK_SHIFT)
+#define ERIAR_MASK_1000			(0x8 << ERIAR_MASK_SHIFT)
+#define ERIAR_MASK_1100			(0xc << ERIAR_MASK_SHIFT)
 #define ERIAR_MASK_1111			(0xf << ERIAR_MASK_SHIFT)
 	EPHY_RXER_NUM		= 0x7c,
 	OCPDR			= 0xb0,	/* OCP GPHY access */
@@ -778,10 +783,10 @@ enum rtl_output_mode {
 	#if defined(CONFIG_ARCH_RTD129x)
 	OUTPUT_RGMII_TO_MAC,
 	OUTPUT_RGMII_TO_PHY,
-	#elif defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+	#elif defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	OUTPUT_SGMII_TO_MAC,
 	OUTPUT_SGMII_TO_PHY,
-	#endif /* CONFIG_ARCH_RTD129x | CONFIG_ARCH_RTD139x | CONFIG_ARCH_RTD16xx */
+	#endif /* CONFIG_ARCH_RTD129x | CONFIG_ARCH_RTD139x | CONFIG_ARCH_RTD16xx | CONFIG_ARCH_RTD13xx */
 	OUTPUT_MAX
 };
 
@@ -870,6 +875,9 @@ enum sbx_sc_wrap_registers {
 };
 #endif /* CONFIG_ARCH_RTD129x | CONFIG_ARCH_RTD139x | CONFIG_ARCH_RTD16xx */
 
+#define RTL_WPD_SIZE		16
+#define RTL_WPD_MASK_SIZE	16
+
 #ifdef RTL_PROC
 static struct proc_dir_entry *rtw_proc;
 static u8 wol_enable=0;
@@ -946,6 +954,11 @@ struct rtl8169_private {
 	u32 saved_wolopts;
 	u32 opts1_mask;
 
+	u8 wol_wpd_cnt;
+	u8 wol_mask[RTL_WPD_SIZE][RTL_WPD_MASK_SIZE];
+	u8 wol_mask_size[RTL_WPD_SIZE];
+	u32 wol_crc[RTL_WPD_SIZE];
+
 	struct rtl_fw {
 		const struct firmware *fw;
 
@@ -973,7 +986,7 @@ struct rtl8169_private {
 	u8 rgmii_voltage; /* 1:1.8V, 2: 2.5V, 3:3.3V */
 	u8 rgmii_tx_delay; /* 0: 0ns, 1: 2ns */
 	u8 rgmii_rx_delay; /* 0: 0ns, 1: 2ns */
-	#elif defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+	#elif defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 	void __iomem *mmio_sbxaddr;
 	void __iomem *mmio_otpaddr;
 	void __iomem *mmio_sdsaddr;
@@ -1381,7 +1394,7 @@ do {									\
 		tmp |= (BIT(1) | BIT(11) | BIT(12));			\
 	r8169soc_ocp_reg_write(tp, 0xfc1e, tmp);			\
 } while (0)
-#elif defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx)
+#elif defined(CONFIG_ARCH_RTD139x) || defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 #define MDIO_WAIT_TIMEOUT	100
 #define MDIO_LOCK							\
 do {									\
@@ -1672,7 +1685,11 @@ static void rtl_irq_enable(struct rtl8169_private *tp, u16 bits)
 
 #define RTL_EVENT_NAPI_RX	(RxOK | RxErr)
 #define RTL_EVENT_NAPI_TX	(TxOK | TxErr)
+#if defined(RTL_ADJUST_FIFO_THRESHOLD)
+#define RTL_EVENT_NAPI		(RTL_EVENT_NAPI_RX | RTL_EVENT_NAPI_TX | RxOverflow)
+#else
 #define RTL_EVENT_NAPI		(RTL_EVENT_NAPI_RX | RTL_EVENT_NAPI_TX)
+#endif /* RTL_ADJUST_FIFO_THRESHOLD */
 
 static void rtl_irq_enable_all(struct rtl8169_private *tp)
 {
@@ -1823,6 +1840,7 @@ void r8169_display_eee_info(struct net_device *dev, struct rtl8169_private *tp)
 	unsigned int	temp, tmp1, tmp2;
 	int		speed = 0;
 	bool		eee1000, eee100, eee10;
+	int		duplex;
 
 	MDIO_LOCK;
 	// page 0xa43
@@ -1833,6 +1851,11 @@ void r8169_display_eee_info(struct net_device *dev, struct rtl8169_private *tp)
 		pr_err("%s: link is down\n", dev->name);
 		return;
 	}
+
+	if ((0x1 << 3) & temp)
+		duplex = 1;
+	else
+		duplex = 0;
 
 	if ((0x0 << 4) == ((0x3 << 4) & temp)) {
 		speed = 10;
@@ -1849,13 +1872,18 @@ void r8169_display_eee_info(struct net_device *dev, struct rtl8169_private *tp)
 			eee10 = true;
 
 		MDIO_UNLOCK;
-		pr_err("%s: link speed = %dM, EEE = %s, PCS_Status = 0x%02x\n", dev->name, speed, eee10?"Y":"N", tmp2 & 0xff);
+		pr_err("%s: link speed = %dM %s, EEE = %s, PCS_Status = 0x%02x\n",
+			dev->name, speed,
+			duplex?"full":"half",
+			eee10?"Y":"N",
+			tmp2 & 0xff);
 		return;
 	}
 	if ((0x1 << 4) == ((0x3 << 4) & temp)) speed = 100;
 	if ((0x2 << 4) == ((0x3 << 4) & temp)) speed = 1000;
 	if ((0x1 << 8) == ((0x1 << 8) & temp)) {
-		pr_err("%s: link speed = %dM, EEE = Y\n", dev->name, speed);
+		pr_err("%s: link speed = %dM %s, EEE = Y\n", dev->name, speed,
+			duplex?"full":"half");
 
 		r8169_mdio_write(tp, 0x1f, 0xa60);
 		tmp1 = r8169_mdio_read(tp, 16);
@@ -1864,7 +1892,8 @@ void r8169_display_eee_info(struct net_device *dev, struct rtl8169_private *tp)
 		tmp2 = r8169_mdio_read(tp, 19);
 		pr_err("PCS_Status = 0x%02x, EEE_wake_error = 0x%04x\n", tmp1 & 0xff, tmp2);
 	} else {
-		pr_err("%s: link speed = %dM, EEE = N\n", dev->name, speed);
+		pr_err("%s: link speed = %dM %s, EEE = N\n", dev->name, speed,
+			duplex?"full":"half");
 
 		temp = r8169_mmd_read(tp, 0x7, 0x3d);
 		if (0 == (temp & (0x1 << 2)))
@@ -4645,6 +4674,79 @@ static __maybe_unused void rtl_disable_msi(struct platform_device *pdev, struct 
 //	}
 }
 
+static void rtl_write_wakeup_pattern(struct rtl8169_private *tp, u32 idx)
+{
+	u8 i,j;
+	u32 reg_mask, reg_shift, reg_offset;
+
+	reg_offset = idx & ~(BIT(0) | BIT(1));
+	reg_shift = (idx % 4) * 8;
+	switch (reg_shift) {
+	case 0:
+		reg_mask = ERIAR_MASK_0001;
+		break;
+	case 8:
+		reg_mask = ERIAR_MASK_0010;
+		break;
+	case 16:
+		reg_mask = ERIAR_MASK_0100;
+		break;
+	case 24:
+		reg_mask = ERIAR_MASK_1000;
+		break;
+	default:
+		pr_err("Invalid shift bit 0x%x, idx = %d\n", reg_shift, idx);
+		return;
+	}
+
+	for (i = 0, j = 0; i < 0x80; i += 8, j++) {
+		/*
+		pr_err("%s:%d: idx %d, j %02d, addr 0x%x mask 0x%04x, val 0x%04x, type 0x%x\n",
+			__func__, __LINE__,
+			idx, j,
+			i + reg_offset, reg_mask,  tp->wol_mask[idx][j] << reg_shift, ERIAR_EXGMAC);
+		*/
+		rtl_eri_write(tp, i + reg_offset, reg_mask, tp->wol_mask[idx][j] << reg_shift, ERIAR_EXGMAC);
+	}
+
+	reg_offset = idx * 2;
+	if (idx % 2) {
+		reg_mask = ERIAR_MASK_1100;
+		reg_offset -= 2;
+		reg_shift = 16;
+	} else {
+		reg_mask = ERIAR_MASK_0011;
+		reg_shift = 0;
+	}
+	/*
+	pr_err("%s:%d: idx %d, CRC addr 0x%x mask 0x%04x, val 0x%04x, type 0x%x\n",
+		__func__, __LINE__,
+		idx,
+		0x80 + reg_offset, reg_mask,  tp->wol_crc[idx] << reg_shift, ERIAR_EXGMAC);
+	*/
+	rtl_eri_write(tp, (int)(0x80 + reg_offset), reg_mask, tp->wol_crc[idx] << reg_shift, ERIAR_EXGMAC);
+}
+
+static void rtl_mdns_crc_wakeup(struct rtl8169_private *tp)
+{
+	int i;
+
+	for (i = 0; i < tp->wol_wpd_cnt; i++)
+		rtl_write_wakeup_pattern(tp, i);
+
+}
+
+static void rtl_clear_wakeup_pattern(struct rtl8169_private *tp)
+{
+	u8 i;
+
+	for (i=0;i<0x80;i+=4)
+		rtl_eri_write(tp, i, ERIAR_MASK_1111, 0x0, ERIAR_EXGMAC);
+
+	for (i=0x80;i<0x90;i+=4)
+		rtl_eri_write(tp, i, ERIAR_MASK_1111, 0x0, ERIAR_EXGMAC);
+}
+
 static void rtl_init_mdio_ops(struct rtl8169_private *tp)
 {
 	struct mdio_ops *ops = &tp->mdio_ops;
@@ -4880,6 +4982,10 @@ static void r8168_pll_power_down(struct rtl8169_private *tp)
 		RTL_W8(MCU, RTL_R8(MCU) | NOW_IS_OOB);
 		RTL_W8(Config5, RTL_R8(Config5) | LanWake);;
 		RTL_W8(Config3, RTL_R8(Config3) | MagicPacket);
+
+		rtl_clear_wakeup_pattern(tp);
+		if (tp->wol_wpd_cnt > 0)
+			rtl_mdns_crc_wakeup(tp);
 	}
 	else
 	{
@@ -6118,6 +6224,20 @@ static void rtl_hw_start_8168(struct net_device *dev)
 		(r8169soc_ocp_reg_read(tp, 0xE610) | (BIT(4) | BIT(6))));
 	#endif /* RTL_TX_NO_CLOSE */
 
+	#if defined(RTL_ADJUST_FIFO_THRESHOLD)
+	tp->event_slow &= ~RxOverflow;
+
+	/* TX FIFO threshold */
+	r8169soc_ocp_reg_write(tp, 0xE618, 0x0006);
+	r8169soc_ocp_reg_write(tp, 0xE61A, 0x0010);
+
+	/* RX FIFO threshold */
+	r8169soc_ocp_reg_write(tp, 0xC0A0, 0x0002);
+	r8169soc_ocp_reg_write(tp, 0xC0A2, 0x0008);
+	r8169soc_ocp_reg_write(tp, 0xC0A4, 0x0088);
+	r8169soc_ocp_reg_write(tp, 0xC0A8, 0x00A8);
+	#endif /* RTL_ADJUST_FIFO_THRESHOLD */
+
 	RTL_R8(IntrMask);
 
 	switch (tp->mac_version) {
@@ -7260,10 +7380,15 @@ static int rtl8169_poll(struct napi_struct *napi, int budget)
 	u16 status;
 
 	status = rtl_get_events(tp);
-	rtl_ack_events(tp, status & ~tp->event_slow);
+	rtl_ack_events(tp, status & ~(tp->event_slow | RxOverflow));
 
 	if (status & RTL_EVENT_NAPI_RX)
 		work_done = rtl_rx(dev, tp, (u32) budget);
+
+	#if defined(RTL_ADJUST_FIFO_THRESHOLD)
+	if ((status & RxOverflow) && work_done > 0)
+		rtl_ack_events(tp, RxOverflow);
+	#endif /* RTL_ADJUST_FIFO_THRESHOLD */
 
 	if (status & RTL_EVENT_NAPI_TX)
 		rtl_tx(dev, tp);
@@ -8016,27 +8141,15 @@ static void rtl_hw_initialize(struct rtl8169_private *tp)
 	}
 }
 #ifdef RTL_PROC
-static ssize_t read_proc(struct file *filp,char *buf,size_t count,loff_t *offp )
+static int wol_read_proc(struct seq_file *m, void *v)
 {
-
-	ssize_t len = 0;
-	static int finished = 0;
-
-	if ( finished ) {
-		printk(KERN_INFO "procfs_read: END\n");
-		finished = 0;
-		return 0;
-	}
-
-	finished = 1;
-
 	printk(KERN_INFO "read procfs ethernet wol_enable = %x \n",wol_enable);
 
-	len = sprintf(buf,"%d\n", wol_enable);
-	return len;
+	seq_printf(m, "%d\n", wol_enable);
+	return 0;
 }
 
-static ssize_t write_proc(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
+static ssize_t wol_write_proc(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
 {
 	char tmp[32];
 	u32 val,num;
@@ -8050,10 +8163,21 @@ static ssize_t write_proc(struct file *file, const char __user *buffer, size_t c
 	return count;
 }
 
-static const struct file_operations proc_fops = {
-.read= read_proc,
-.write= write_proc,
+static int wol_proc_open(struct inode *inode, struct file *file)
+{
+	struct net_device *dev = proc_get_parent_data(inode);
+
+	return single_open(file, wol_read_proc, dev);
+}
+
+static const struct file_operations wol_proc_fops = {
+	.open           = wol_proc_open,
+	.read           = seq_read,
+	.write          = wol_write_proc,
+	.llseek         = seq_lseek,
+	.release        = single_release,
 };
+
 
 static int eee_read_proc(struct seq_file *m, void *v)
 {
@@ -8733,7 +8857,7 @@ static void r8169soc_phy_iol_tuning(struct rtl8169_private *tp)
 		/* r8169_mdio_write(tp, 31, 0xbd0); */
 		r8169_mdio_write(tp, 17, 0xf8ca);
 		break;
-	case RTD_CHIP_B00: /* UMC, cut C */
+	case RTD_CHIP_A02: /* UMC, cut C */
 		/* 100M Swing */
 		/* idac_fine_mdix, idac_fine_mdi */
 		r8169_mdio_write(tp, 31, 0xbc0);
@@ -8944,6 +9068,7 @@ static void r8169soc_eee_init(struct rtl8169_private *tp, bool enable)
 		/* EEE MAC mode */
 		r8169soc_ocp_reg_write(tp, 0xe040, (r8169soc_ocp_reg_read(tp, 0xe040) | (BIT(1) | BIT(0))));
 		/* EEE+ MAC mode */
+		r8169soc_ocp_reg_write(tp, 0xe08a, 0x00a7); /* timer to wait FEPHY ready */
 		r8169soc_ocp_reg_write(tp, 0xe080, (r8169soc_ocp_reg_read(tp, 0xe080) | BIT(1)));
 	} else {
 		if (tp->output_mode == OUTPUT_EMBEDDED_PHY) {
@@ -8966,6 +9091,7 @@ static void r8169soc_eee_init(struct rtl8169_private *tp, bool enable)
 		r8169soc_ocp_reg_write(tp, 0xe040, (r8169soc_ocp_reg_read(tp, 0xe040) & ~(BIT(1) | BIT(0))));
 		/* EEE+ MAC mode */
 		r8169soc_ocp_reg_write(tp, 0xe080, (r8169soc_ocp_reg_read(tp, 0xe080) & ~BIT(1)));
+		r8169soc_ocp_reg_write(tp, 0xe08a, 0x003f); /* default value */
 	}
 }
 #endif /* CONFIG_ARCH_RTD139x */
@@ -9883,6 +10009,8 @@ rtl_init_one(struct platform_device *pdev)
 	int irq;
 	int retry;
 	const char *mac_addr;
+	struct property *wake_mask;
+	char tmp_str[80];
 #ifdef RTL_PROC
 	struct proc_dir_entry *dir_dev = NULL;
 	struct proc_dir_entry *entry=NULL;
@@ -9970,6 +10098,7 @@ rtl_init_one(struct platform_device *pdev)
 		pr_info("~~~ disable Gb features~~~\n");
 		cfg->features &= ~RTL_FEATURE_GMII;
 	}
+
 	irq = irq_of_parse_and_map(pdev->dev.of_node, 0);
 	if (!pdev->dev.dma_mask)
 		pdev->dev.dma_mask = &pdev->dev.coherent_dma_mask;
@@ -10088,6 +10217,22 @@ rtl_init_one(struct platform_device *pdev)
 	#endif /* CONFIG_ARCH_RTD129x | CONFIG_ARCH_RTD139x | CONFIG_ARCH_RTD16xx */
 #endif
 
+	tp->wol_wpd_cnt = 0;
+	for (i = 0; i < RTL_WPD_SIZE; i++) {
+		memset(tmp_str, 0, 80);
+		sprintf(tmp_str, "wake-mask%d", i);
+		wake_mask = of_find_property(pdev->dev.of_node, tmp_str, NULL);
+		if (!wake_mask)
+			break;
+		tp->wol_mask_size[i] = wake_mask->length;
+		memcpy(&tp->wol_mask[i][0], wake_mask->value, wake_mask->length);
+
+		sprintf(tmp_str, "wake-crc%d", i);
+		if (of_property_read_u32(pdev->dev.of_node, tmp_str, &tp->wol_crc[i]))
+			break;
+		tp->wol_wpd_cnt = i + 1;
+	}
+
 #if 0	//barry
 	/* disable ASPM completely as that cause random device stop working
 	 * problems as well as full system hangs for some PCIe devices users */
@@ -10184,7 +10329,7 @@ rtl_init_one(struct platform_device *pdev)
 
 
 		entry = proc_create_data("wol_enable", S_IFREG | S_IRUGO,
-				   dir_dev, &proc_fops, NULL);
+				   dir_dev, &wol_proc_fops, NULL);
 		if (!entry) {
 			printk(KERN_INFO "procfs:create /proc/net/eth0/r8169/wol_enable failed\n");
 			break;

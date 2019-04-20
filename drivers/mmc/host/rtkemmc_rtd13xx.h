@@ -12,7 +12,7 @@
 #include "reg_mmc_rtd13xx.h"               
 #include "mmc_debug.h"               
 
-#define EMMC_MAX_SCRIPT_BLK   8   
+#define EMMC_MAX_SCRIPT_BLK   128
 
 //debug
 //#define MMC_DBG
@@ -88,6 +88,9 @@ struct rtkemmc_host {
 	u8		tx_reference_phase;
 	u8		rx_reference_phase;
 	unsigned long	emmc_tuning_addr;
+#if defined(CONFIG_MMC_RTK_EMMC_CMDQ)
+	struct cmdq_host *cq_host;
+#endif
 };
 
 struct rtk_host_ops {
@@ -108,6 +111,54 @@ struct rtk_host_ops {
 	void (*backup_regs)(struct rtkemmc_host *emmc_port);
 	void (*restore_regs)(struct rtkemmc_host *emmc_port);
 };
+
+#ifdef CONFIG_MMC_RTK_EMMC_CMDQ
+struct cmdq_host {
+	const struct cmdq_host_ops *ops;
+	struct mmc_host *mmc;
+
+	/* 64 bit DMA */
+	bool dma64;
+
+	int num_slots;
+	int start_slot;
+	u32 dcmd_slot;
+
+	//u32 caps;
+#define CMDQ_TASK_DESC_SZ_128 0x1
+
+	//u32 quirks;
+#define CMDQ_QUIRK_SHORT_TXFR_DESC_SZ 0x1
+#define CMDQ_QUIRK_NO_DCMD      0x2
+
+	bool enabled;
+	bool halted;
+	bool init_done;
+
+	u32 *desc_base;
+
+	/* total descriptor size */
+	u8 slot_sz;
+
+
+	/* 64/128 bit depends on CQCFG */
+	u8 task_desc_len;
+
+	/* 64 bit on 32-bit arch, 128 bit on 64-bit */
+	u8 link_desc_len;
+
+	u32 *trans_desc_base;
+	/* same length as transfer descriptor */
+	u8 trans_desc_len;
+
+	dma_addr_t desc_dma_base;
+	dma_addr_t trans_desc_dma_base;
+
+	struct completion halt_comp;
+	struct mmc_request **mrq_slot;
+	void *private;
+};
+#endif
 
 struct sd_cmd_pkt {
 	struct mmc_host     *mmc;       /* MMC structure */
@@ -171,8 +222,8 @@ struct backupRegs {
 //clear status register, we always keep the card interrupt, card insertion, removal status because the eMMC is unremovable
 #define rtkemmc_clr_int_sta()                                                                              \
 	do {                                                                                                \
-		writew(readw(emmc_port->emmc_membase+EMMC_ERROR_INT_STAT_R)&0xffff, emmc_port->emmc_membase+EMMC_ERROR_INT_STAT_R); \
-		writew(readw(emmc_port->emmc_membase+EMMC_NORMAL_INT_STAT_R)&0xfeff, emmc_port->emmc_membase+EMMC_NORMAL_INT_STAT_R); \
+		rtkemmc_writew(readw(emmc_port->emmc_membase+EMMC_ERROR_INT_STAT_R)&0xffff, emmc_port->emmc_membase+EMMC_ERROR_INT_STAT_R); \
+		rtkemmc_writew(readw(emmc_port->emmc_membase+EMMC_NORMAL_INT_STAT_R)&0xfeff, emmc_port->emmc_membase+EMMC_NORMAL_INT_STAT_R); \
 	} while(0)
 
 //mask all emmc interrupts
@@ -182,10 +233,10 @@ struct backupRegs {
                 writew(0x0,emmc_port->emmc_membase+EMMC_ERROR_INT_SIGNAL_EN_R); \
 	} while(0)
 
-//unmask all emmc interrupt			
-#define rtkemmc_en_int()  \
+//for cmdq, we do not need cmd and xfer done, only cqe event
+#define rtkemmc_en_cqe_int()  \
 	do { \
-		writew(EMMC_ALL_SIGNAL_STAT_EN,emmc_port->emmc_membase+EMMC_NORMAL_INT_SIGNAL_EN_R); \
+		writew(0xfefc,emmc_port->emmc_membase+EMMC_NORMAL_INT_SIGNAL_EN_R); \
 		writew(EMMC_ALL_ERR_SIGNAL_EN,emmc_port->emmc_membase+EMMC_ERROR_INT_SIGNAL_EN_R); \
 	} while(0)
 

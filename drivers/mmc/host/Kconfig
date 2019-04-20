@@ -17,9 +17,10 @@ config MMC_RTK_EMMC_HW_SEMAPHORE
           Enable Realtek EMMC host driver hardware semaphore.
 
 menuconfig MMC_RTK_EMMC_CMDQ
-    bool "Realtek EMMC host driver with cqe function"
+    bool "Realtek EMMC host driver with cmdq function"
 	depends on MMC_RTK_EMMC
 	depends on ARCH_RTD13xx
+	depends on HAS_DMA
 	default n
         help
           Support RealTek EMMC for Hank cqe function.

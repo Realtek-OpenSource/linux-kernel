@@ -47,22 +47,4 @@ static inline struct rdbg_info *of_rdbg_get_info(struct device_node *np,
 	return info;
 }
 
-#ifdef CONFIG_RTK_PM_RUNTIME_DEBUG
-
-int rpm_debug_sysfs_add(struct device *dev);
-void rpm_debug_sysfs_remove(struct device *dev);
-
-#else /* !CONFIG_RTK_PM_RUNTIME_DEBUG */
-
-static inline int rpm_debug_sysfs_add(struct device *dev)
-{
-	return 0;
-}
-
-static inline void rpm_debug_sysfs_remove(struct device *dev)
-{}
-
-#endif /* CONFIG_RTK_PM_RUNTIME_DEBUG */
-
-
 #endif /* __SOC_REALTEK_DEBUG_H */

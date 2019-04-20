@@ -17,7 +17,7 @@
 #include "clk-pll.h"
 #include "clk-mmio-gate.h"
 #include "clk-mmio-mux.h"
-#include "include/clk_regmap_rtd129x.h"
+#include "clk_regmap.h"
 #include <dt-bindings/clock/rtk,clock-rtd129x.h>
 
 #define DEFAULT_PARENT_OSC27M    (const char *[]){ "osc27M" }

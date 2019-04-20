@@ -1,3 +1,25 @@
+/*
+ * Realtek Demod Driver
+ *
+ * Copyright (C) 2018-2019 Realtek Semiconductor Corp.
+ *
+ * Author:
+ *   Cheng-Yu Lee <cylee12@realtek.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ */
+
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/miscdevice.h>
@@ -26,7 +48,7 @@ struct rtk_demod_device {
 	resource_size_t       size;
 };
 
-struct rtk_demode_ctx {
+struct rtk_demod_ctx {
 	struct rtk_demod_device *dmdev;
 };
 
@@ -35,7 +57,7 @@ static int rtk_demod_open(struct inode *inode, struct file *filp)
 	struct rtk_demod_device *dmdev = container_of(filp->private_data,
 						      struct rtk_demod_device,
 						      mdev);
-	struct rtk_demode_ctx *ctx;
+	struct rtk_demod_ctx *ctx;
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
@@ -51,7 +73,7 @@ static int rtk_demod_open(struct inode *inode, struct file *filp)
 
 static int rtk_demod_release(struct inode *inode, struct file *filp)
 {
-	struct rtk_demode_ctx *ctx = filp->private_data;
+	struct rtk_demod_ctx *ctx = filp->private_data;
 	struct rtk_demod_device *dmdev = ctx->dmdev;
 
 	pm_runtime_put_sync(dmdev->dev);
@@ -68,7 +90,7 @@ static const struct vm_operations_struct rtk_demod_vm_ops = {
 
 static int rtk_demod_mmap(struct file *filp, struct vm_area_struct *vma)
 {
-	struct rtk_demode_ctx *ctx = filp->private_data;
+	struct rtk_demod_ctx *ctx = filp->private_data;
 	struct rtk_demod_device *dmdev = ctx->dmdev;
 
 	if (vma->vm_end < vma->vm_start)
@@ -176,8 +198,6 @@ static int rtk_demod_probe(struct platform_device *pdev)
 	int ret;
 	struct resource res;
 
-	dev_info(dev, "%s\n", __func__);
-
 	dmdev = devm_kzalloc(dev, sizeof(*dmdev), GFP_KERNEL);
 	if (!dmdev)
 		return -ENOMEM;
@@ -234,7 +254,7 @@ static int rtk_demod_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, dmdev);
 	pm_runtime_set_suspended(dev);
 	pm_runtime_enable(dev);
-
+	dev_info(dev, "initialized\n");
 	return 0;
 }
 
@@ -246,6 +266,7 @@ static int rtk_demod_remove(struct platform_device *pdev)
 	pm_runtime_disable(dev);
 	platform_set_drvdata(pdev, NULL);
 	misc_deregister(&dmdev->mdev);
+	dev_info(dev, "removed\n");
 	return 0;
 }
 
@@ -259,6 +280,7 @@ static struct platform_driver rtk_demod_driver = {
 	.probe = rtk_demod_probe,
 	.remove = rtk_demod_remove,
 	.driver = {
+		.owner = THIS_MODULE,
 		.name = "rtk-demod",
 		.of_match_table = rtk_demod_ids,
 		.pm = &rtk_demod_pm_ops,

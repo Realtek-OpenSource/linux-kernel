@@ -210,6 +210,45 @@
 		};
 	};
 
+	sdio: sdio@98010A00 {
+		status = "disabled";
+	};
+
+	hdmirx@98034000 {
+		status = "disabled";
+	};
+
+	smartcard@9801BE00 {
+		status = "disabled";
+	};
+
+	spdif {
+		status = "disabled";
+	};
+
+	rfkill: rfkilligpio {
+		status = "disabled";
+	};
+
+	uart1: serial1@9801B200 {
+		status = "disabled";
+	};
+
+	uart2: serial2@9801B400 {
+		status = "disabled";
+	};
+
+	hse@98005000 {
+		status = "disabled";
+	};
+
+	rtk_iso_gpio: rtk_iso_gpio@98007100 {
+		gpios = <&rtk_iso_gpio 60 1 1>;
+		wakeup-gpio-list = <&rtk_iso_gpio 26 0 1>;
+		wakeup-gpio-enable = <0>;
+		wakeup-gpio-activity = <0>;
+	};
+
 	ahci_sata: sata@9803F000 {
 		gpios = <&rtk_iso_gpio 67 1 1>,
 			<&rtk_iso_gpio 62 1 1>,

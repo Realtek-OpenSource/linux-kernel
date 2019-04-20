@@ -3,5 +3,10 @@
 
 / {
 	model= "Realtek_ARETE_1GB_AVB";
+	rtk_dwc3_drd@98013200 {
+		rtk_dwc3_drd_type_c@0 {
+			/delete-property/ drd_mode;
+		};
+	};
 };
 

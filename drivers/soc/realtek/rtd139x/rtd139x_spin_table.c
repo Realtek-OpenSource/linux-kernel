@@ -33,14 +33,14 @@
 #include <asm/io.h>
 #include <asm/smp_plat.h>
 
-#include "rtd139x_cpu_hotplug.h"
 #include <soc/realtek/rtk_cpu.h>
-
 
 #ifdef CONFIG_SMP
 
 extern void _rtk_cpu_power_up(int cpu);
 extern void secondary_holding_pen(void);
+
+void __cpu_do_lowpower(void);
 
 volatile unsigned long rtk_secondary_holding_pen_release = INVALID_HWID;
 
@@ -183,7 +183,7 @@ static void smp_spin_table_cpu_die(unsigned int cpu)
 	cpu_hotplug[cpu] = 1;
 	flush_cache_all();
 	setup_mm_for_reboot();
-	cpu_do_lowpower(cpu_release_addr[cpu]);
+	__cpu_do_lowpower();
 }
 #endif
 

@@ -187,6 +187,18 @@
 			realtek,function = "tp1";
 		};
 
+		ao_pins: ao_pins {
+			realtek,pins =
+				"tp_data_1",
+				"tp_data_2",
+				"tp_data_3",
+				"tp_data_4",
+				"tp_data_5",
+				"tp_data_6",
+				"tp_data_7";
+			realtek,function = "ao";
+		};
+
 		ir_rx_pins: ir_rx_pins {
 			realtek,pins = "ir_rx";
 			realtek,function = "ir_rx";
@@ -412,6 +424,11 @@
 		usb_cc2_pins: usb_cc2_pins {
 			realtek,pins = "usb_cc2";
 			realtek,function = "usb_cc2";
+		};
+
+		demod_pins: demod-pins {
+			realtek,pins = "demod_agc";
+			realtek,function = "qam_agc_if";
 		};
 
 		/*rtc_pins: rtc_pins {

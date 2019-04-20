@@ -22,25 +22,32 @@
 #include <linux/i2c.h>
 #include <linux/io.h>
 #include <linux/delay.h>
+#include <linux/arm-smccc.h>
 #include <asm/irq.h>
 
 #include "i2c-rtk-priv.h"
-#include "soc/realtek/rtk_smccall.h"
 
-#ifdef CONFIG_ARCH_RTD16xx
+#ifdef CONFIG_I2C_RTK_SECURE_ACCESS
+extern bool secure_dvfs_is_disabled(void);
+
 static void swc_write(unsigned int address, unsigned int value)
 {
-	unsigned int tmp;
+	struct arm_smccc_res res;
 
-	tmp = rtk_smc(0x8400ff0a, value, 0);
+	arm_smccc_smc(0x8400ff0a, value, 0, 0, 0, 0, 0, 0, &res);
 }
 
 void SET_IC_ENABLE(struct rtk_i2c_handler *handler, int value)
 {
-	if (handler->id == 0)
-		swc_write(handler->reg_map.IC_ENABLE, value);
-	else
+	if (handler->id == 0 && !secure_dvfs_is_disabled()) {
+#if defined(CONFIG_OPTEE) && defined(CONFIG_ARCH_RTD16xx)
+		ta_hdcp_lib_set_i2c_enable(value);
+#else
 		wr_reg(handler->reg_map.IC_ENABLE, value);
+#endif
+	} else {
+		wr_reg(handler->reg_map.IC_ENABLE, value);
+	}
 }
 #endif
 /*
@@ -53,6 +60,10 @@ int rtk_i2c_handler_init(struct rtk_i2c_handler *handler)
 {
 	RTK_DEBUG("%s\n", __func__);
 
+#if defined(CONFIG_OPTEE) && defined(CONFIG_ARCH_RTD16xx)
+	if (handler->id == 0)
+		ta_i2c_init();
+#endif
 #if 0
 	if (handler->flags & RTK_I2C_IRQ_RDY)
 		return 0;
@@ -657,7 +668,10 @@ void rtk_i2c_master_write(struct rtk_i2c_handler *handler, unsigned int event,
 
 	if (handler->xfer.ret) {
 		SET_IC_INTR_MASK(handler, 0);
+#if defined(CONFIG_OPTEE) && defined(CONFIG_ARCH_RTD16xx)
+#else
 		SET_IC_ENABLE(handler, 0);
+#endif
 		handler->xfer.mode = I2C_IDLE; /* change to idle state */
 		wake_up(&handler->wq);
 	}
@@ -724,7 +738,10 @@ void rtk_i2c_master_read(struct rtk_i2c_handler *handler, unsigned int event,
 
 	if (handler->xfer.ret  && (handler->xfer.ret!=-ETXABORT)) {
 		SET_IC_INTR_MASK(handler, 0);
+#if defined(CONFIG_OPTEE) && defined(CONFIG_ARCH_RTD16xx)
+#else
 		SET_IC_ENABLE(handler, 0);
+#endif
 		handler->xfer.mode = I2C_IDLE; /* change to idle state */
 		wake_up(&handler->wq);
 	}
@@ -833,7 +850,10 @@ void rtk_i2c_master_random_read(struct rtk_i2c_handler *handler,
 
 	if (handler->xfer.ret) {
 		SET_IC_INTR_MASK(handler, 0);
+#if defined(CONFIG_OPTEE) && defined(CONFIG_ARCH_RTD16xx)
+#else
 		SET_IC_ENABLE(handler, 0);
+#endif
 		handler->xfer.mode = I2C_IDLE; /* change to idle state */
 		wake_up(&handler->wq);
 	}
@@ -953,11 +973,17 @@ irqreturn_t rtk_i2c_isr(int this_irq, void *dev_id)
 
 	RTK_DEBUG("%s\n", __func__);
 
+#if defined(CONFIG_OPTEE) && defined(CONFIG_ARCH_RTD16xx)
+#else
 	LOCK_RTK_I2C(&handler->lock, flags);
+#endif
 
 	/* interrupt belongs to I2C */
 	if (!(GET_I2C_ISR(handler) & handler->reg_map.I2C_INT)) {
+#if defined(CONFIG_OPTEE) && defined(CONFIG_ARCH_RTD16xx)
+#else
 		UNLOCK_RTK_I2C(&handler->lock, flags);
+#endif
 		return IRQ_NONE;
 	}
 
@@ -1012,13 +1038,19 @@ irqreturn_t rtk_i2c_isr(int this_irq, void *dev_id)
 
 		default:
 			pr_info("Unexcepted Interrupt\n");
+#if defined(CONFIG_OPTEE) && defined(CONFIG_ARCH_RTD16xx)
+#else
 			SET_IC_ENABLE(handler, 0);
+#endif
 		}
 	}
 
 	/* clear I2C Interrupt Flag */
 	SET_I2C_ISR(handler, handler->reg_map.I2C_INT);
+#if defined(CONFIG_OPTEE) && defined(CONFIG_ARCH_RTD16xx)
+#else
 	UNLOCK_RTK_I2C(&handler->lock, flags);
+#endif
 	return IRQ_HANDLED;
 }
 

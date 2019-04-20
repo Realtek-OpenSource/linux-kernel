@@ -48,9 +48,6 @@ static void dptx_switch_work_func(struct work_struct *work)
 	struct rtk_dptx_device *dptx_dev =
 			container_of(swdev, struct rtk_dptx_device, swdev);
 	struct device *dev = dptx_dev->dev;
-	int ret;
-	unsigned char *block;
-	struct edid *edid;
 
 	swdev->state = gpio_get_value(swdev->hpd_gpio);
 	if (swdev->state != switch_get_state(&swdev->sw))
@@ -58,28 +55,12 @@ static void dptx_switch_work_func(struct work_struct *work)
 	else
 		return;
 
-	if (swdev->state) {
-		rtk_dptx_enable(dptx_dev);
-		if (!dptx_dev->ignore_edid) {
-			ret = dptx_read_edid(&dptx_dev->hwinfo,
-				dptx_dev->cap.edid_ptr, 256);
-			if (ret < 0) {
-				dev_err(dev, "Read EDID fail\n");
-				if (dptx_dev->selftest)
-					dptx_config_tv_system(&dptx_dev->hwinfo);
-				return;
-			}
-		}
-		block = dptx_dev->cap.edid_ptr;
-		dptx_dev->cap.sink_cap_available = true;
+	if (!swdev->state)
+		dptx_dev->cap.sink_cap_available = false;
 
-		edid = (struct edid *)dptx_dev->cap.edid_ptr;
-		memset(&dptx_dev->cap.sink_cap, 0,
-			sizeof(struct sink_capabilities_t));
-		dptx_add_edid_modes(edid, &dptx_dev->cap.sink_cap);
-		if (dptx_dev->selftest)
-			dptx_config_tv_system(&dptx_dev->hwinfo);
-	}
+	if (dptx_dev->selftest)
+		dptx_config_tv_system(&dptx_dev->hwinfo);
+
 	switch_set_state(&swdev->sw, swdev->state);
 }
 

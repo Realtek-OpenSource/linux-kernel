@@ -15,7 +15,7 @@
 #include <linux/ioport.h>
 #include <linux/io.h>
 #include <linux/bitops.h>
-#include <soc/realtek/rtk_smccall.h>
+#include <linux/arm-smccc.h>
 
 /* register definitions */
 #define SB2_HD_SEM                      (0x000)
@@ -57,6 +57,7 @@
 #define SB2_DBG_CTRL_REG6               (0x4b0)
 #define SB2_DBG_CTRL_REG7               (0x4b4)
 #define SB2_DBG_ADDR_AUDIO              (0x4b8)
+#define SB2_DBG_ADDR_PCPU               (0x4bc)
 #define SB2_DBG_ADDR_SYSTEM             (0x4c0)
 #define SB2_DBG_ADDR1                   (0x4c8)
 #define SB2_DBG_INT                     (0x4E0)
@@ -120,17 +121,19 @@ struct sb2_data {
 	void *base;
 	phys_addr_t phy;
 	int offset;
+	int irq;
 };
+
 
 #ifdef CONFIG_RTK_SB2_SECURITY_DEBG
 #define SB2_USE_SMCCALL                (1)
 
-#ifdef CONFIG_ARCH_RTD139x
-#define SB2_SWCIO_RCMD                  0x8400ff06
-#define SB2_SWCIO_WCMD                  0x8400ff07
-#elif CONFIG_ARCH_RTD16xx
+#if defined(CONFIG_ARCH_RTD16xx) || defined(CONFIG_ARCH_RTD13xx)
 #define SB2_SWCIO_RCMD                  0x8400fffe
 #define SB2_SWCIO_WCMD                  0x8400ffff
+#elif defined(CONFIG_ARCH_RTD139x)
+#define SB2_SWCIO_RCMD                  0x8400ff06
+#define SB2_SWCIO_WCMD                  0x8400ff07
 #else
 #error "invalid sb2 smccall cmd"
 #endif
@@ -172,7 +175,10 @@ static inline u32 sb2_read(struct sb2_data *data,
 	u32 val;
 
 #ifdef CONFIG_RTK_SB2_SECURITY_DEBG
-	val = rtk_smc(SB2_SWCIO_RCMD, (u32)data->phy | (offset + data->offset), 0);
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(SB2_SWCIO_RCMD, (u32)data->phy | (offset + data->offset), 0, 0, 0, 0, 0, 0, &res);
+	val = res.a0;
 #else
 	val = readl(data->base + offset);
 #endif
@@ -184,7 +190,9 @@ static inline void sb2_write(struct sb2_data *data,
 			     u32 val)
 {
 #ifdef CONFIG_RTK_SB2_SECURITY_DEBG
-	rtk_smc(SB2_SWCIO_WCMD, (u32)data->phy | (offset + data->offset), val);
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(SB2_SWCIO_WCMD, (u32)data->phy | (offset + data->offset), val, 0, 0, 0, 0, 0, &res);
 #else
 	writel(val, data->base + offset);
 #endif

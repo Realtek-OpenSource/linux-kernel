@@ -9043,7 +9043,7 @@ rtl8125_hw_config(struct net_device *dev)
                 SetMcuAccessRegBit(tp, 0xEB54, BIT_0);
                 udelay(1);
                 ClearMcuAccessRegBit(tp, 0xEB54, BIT_0);
-                //RTL_W16(0x1880, RTL_R16(0x1880)&~(BIT_4 | BIT_5));
+                RTL_W16(0x1880, RTL_R16(0x1880)&~(BIT_4 | BIT_5));
         }
 
         /* csum offload command for RTL8125 */

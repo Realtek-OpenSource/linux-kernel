@@ -72,14 +72,14 @@ static inline void unprepare(struct rtk_analog_pd *apd)
 	}
 }
 
-static int rtk_analog_power_on(struct power_control *pctrl)
+static int rtk_analog_power_on(struct power_control *pwrctrl)
 {
-	struct rtk_analog_pd *apd = pc_to_rtk_analog_pd(pctrl);
+	struct rtk_analog_pd *apd = pc_to_rtk_analog_pd(pwrctrl);
 	void *reg = apd->base + apd->pwr_offset;
 	unsigned int val;
 	unsigned long flags;
 
-	pr_debug("%s: %s\n", __func__, pctrl->name);
+	pr_debug("%s: %s\n", __func__, pwrctrl->name);
 
 	prepare(apd);
 
@@ -95,14 +95,14 @@ static int rtk_analog_power_on(struct power_control *pctrl)
 	return 0;
 }
 
-static int rtk_analog_power_off(struct power_control *pctrl)
+static int rtk_analog_power_off(struct power_control *pwrctrl)
 {
-	struct rtk_analog_pd *apd = pc_to_rtk_analog_pd(pctrl);
+	struct rtk_analog_pd *apd = pc_to_rtk_analog_pd(pwrctrl);
 	void *reg = apd->base + apd->pwr_offset;
 	unsigned int val;
 	unsigned long flags;
 
-	pr_debug("%s: %s\n", __func__, pctrl->name);
+	pr_debug("%s: %s\n", __func__, pwrctrl->name);
 
 	prepare(apd);
 
@@ -118,9 +118,9 @@ static int rtk_analog_power_off(struct power_control *pctrl)
 	return 0;
 }
 
-static int rtk_analog_is_powered_on(struct power_control *pctrl)
+static int rtk_analog_is_powered_on(struct power_control *pwrctrl)
 {
-	struct rtk_analog_pd *apd = pc_to_rtk_analog_pd(pctrl);
+	struct rtk_analog_pd *apd = pc_to_rtk_analog_pd(pwrctrl);
 	void *reg = apd->base + apd->pwr_offset;
 	unsigned int val;
 	unsigned long flags;
@@ -138,7 +138,7 @@ static int rtk_analog_is_powered_on(struct power_control *pctrl)
 	return val == 1;
 }
 
-const struct power_control_ops rtk_analog_ops = {
+const struct power_control_ops rtk_analog_power_ops = {
 	.power_off     = rtk_analog_power_off,
 	.power_on      = rtk_analog_power_on,
 	.is_powered_on = rtk_analog_is_powered_on,

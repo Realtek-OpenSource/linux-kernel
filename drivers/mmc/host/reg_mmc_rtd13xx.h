@@ -40,26 +40,10 @@
 #define EMMC_HOST_CTRL2_R                    (CR_BASE_ADDR + 0x03e)
 #define EMMC_ADMA_ERR_STAT_R		     (CR_BASE_ADDR + 0x054)
 #define EMMC_ADMA_SA_LOW_R                   (CR_BASE_ADDR + 0x058)
-#define EMMC_CQCFG                   	     (CR_BASE_ADDR + 0x088)
-#define EMMC_CQCTL                           (CR_BASE_ADDR + 0x08c)
-#define EMMC_CQIS                            (CR_BASE_ADDR + 0x090)
-#define EMMC_CQI_STATUS_E                    (CR_BASE_ADDR + 0x094)
-#define EMMC_CQI_SIGNAL_E                    (CR_BASE_ADDR + 0x098)
-#define EMMC_CQIC                    	     (CR_BASE_ADDR + 0x09c)
-#define EMMC_CQDTLBA                         (CR_BASE_ADDR + 0x1a0)
-#define EMMC_CQDTBR                          (CR_BASE_ADDR + 0x1a8)
-#define EMMC_CQTCN                           (CR_BASE_ADDR + 0x1ac)
-#define EMMC_CQDQS                           (CR_BASE_ADDR + 0x1b0)
-#define EMMC_CQDPT                           (CR_BASE_ADDR + 0x1b4)
-#define EMMC_CQTCLR                          (CR_BASE_ADDR + 0x1b8)
-#define EMMC_CQSSC2                          (CR_BASE_ADDR + 0x1c4)
-#define EMMC_CQCRDCT                         (CR_BASE_ADDR + 0x1c8)
-#define EMMC_CQRMEM                          (CR_BASE_ADDR + 0x1d0)
-#define EMMC_CQTERR1                         (CR_BASE_ADDR + 0x1d4)
-#define EMMC_CQCR1                           (CR_BASE_ADDR + 0x1d8)
-#define EMMC_CQCRA                           (CR_BASE_ADDR + 0x1dc)
 #define EMMC_AT_CTRL_R                       (CR_BASE_ADDR + 0x240)
 
+#define EMMC_MSHC_CTRL_R                     (CR_BASE_ADDR + 0x208)
+#define EMMC_CMD_CONFLICT_CHECK              (1<<0)
 
 //hank emmc wrapper register
 #define EMMC_CP                       	(CR_BASE_ADDR + 0x41c)
@@ -312,4 +296,74 @@
 #define EMMC_NAND_DMA_SEL		(0x54)
 
 #define EMMC_CLK_O_ICG_EN		(1<<3)
+
+#define EMMC_SW_RST_DAT			(1<<2)
+
+#ifdef CONFIG_MMC_RTK_EMMC_CMDQ
+//command queue related registers
+#define DCMD_SLOT 31
+#define NUM_SLOTS 32	//reserve slot 0 for pon
+/* 1 sec */
+#define HALT_TIMEOUT_MS 1000
+
+#define EMMC_CQCFG		(0x188)
+#define EMMC_CQCTL		(0x18c)
+#define EMMC_CQIS		(0x190)
+#define EMMC_CQIS_STAT_EN	(0x194)
+#define EMMC_CQIS_SIGNAL_EN	(0x198)
+#define EMMC_CQIC		(0x19c)
+#define EMMC_CQTDLBA		(0x1a0)
+#define EMMC_CQTDBR		(0x1a8)
+#define EMMC_CQTCN		(0x1ac)
+#define EMMC_CQDQS		(0x1b0)
+#define EMMC_CQDPT		(0x1b4)
+#define EMMC_CQTCLR		(0x1b8)
+#define EMMC_CQSSC1		(0x1c0)
+#define EMMC_CQSSC2		(0x1c4)
+#define EMMC_CQCRDCT		(0x1c8)
+#define EMMC_CQRMEM		(0x1d0)
+#define EMMC_CQTERRI		(0x1d4)
+#define EMMC_CQCRI		(0x1d8)
+#define EMMC_CQCRA		(0x1dc)
+
+#define EMMC_CQ_EN		(1<<0)
+#define EMMC_CQ_HALT		(1<<0)
+#define EMMC_TASK_DESC_SIZE	(1<<8)
+#define EMMC_DCMD_EN		(1<<12)
+
+#define VALID(x)        ((x & 1) << 0)
+#define END(x)          ((x & 1) << 1)
+#define INT(x)          ((x & 1) << 2)
+#define ACT(x)          ((x & 0x7) << 3)
+
+#define EMMC_CQIS_HAC        (1<<0)
+#define EMMC_CQIS_TCC        (1<<1)
+#define EMMC_CQIS_RED        (1<<2)
+#define EMMC_CQIS_TCL        (1<<3)
+
+/* data command task descriptor fields */
+#define FORCED_PROG(x)  ((x & 1) << 6)
+#define CONTEXT(x)      ((x & 0xF) << 7)
+#define DATA_TAG(x)     ((x & 1) << 11)
+#define DATA_DIR(x)     ((x & 1) << 12)
+#define PRIORITY(x)     ((x & 1) << 13)
+#define QBAR(x)         ((x & 1) << 14)
+#define REL_WRITE(x)    ((x & 1) << 15)
+#define BLK_COUNT(x)    ((x & 0xFFFF) << 16)
+#define BLK_ADDR(x)     ((x & 0xFFFFFFFF) << 32)
+
+/* direct command task descriptor fields */
+#define CMD_INDEX(x)    ((x & 0x3F) << 16)
+#define CMD_TIMING(x)   ((x & 1) << 22)
+#define RESP_TYPE(x)    ((x & 0x3) << 23)
+
+/* transfer descriptor fields */
+#define DAT_LENGTH(x)   ((x & 0xFFFF) << 16)
+#define DAT_ADDR_LO(x)  ((x & 0xFFFFFFFF) << 32)
+#define DAT_ADDR_HI(x)  ((x & 0xFFFFFFFF) << 0)
+
+#define EMMC_CQ_ALL_STAT_EN                   (0x3f)
+#define EMMC_CQ_ALL_SIGNAL_EN                 (0x3f)
+#endif
+
 #endif

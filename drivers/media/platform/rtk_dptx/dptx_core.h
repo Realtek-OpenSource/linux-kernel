@@ -114,9 +114,9 @@ struct rtk_dptx_device {
 	unsigned int ignore_edid;
 	unsigned int dptx_irq;
 
+	unsigned int dptx_en;
 	unsigned int selftest;
 };
 
-void rtk_dptx_enable(struct rtk_dptx_device *dptx_dev);
 int register_dptx_switch(struct rtk_dptx_device *dptx_dev);
 #endif  //__DPTX_CORE_H__

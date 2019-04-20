@@ -37,7 +37,8 @@
 #include <asm/system_misc.h>
 
 #include "../../common/include/debug.h"
-#include "rtd139x_cpu_hotplug.h"
+
+void __cpu_do_lowpower(void);
 
 #define DBG_INT 0x230
 #define DBG_ADDR 0x234
@@ -152,9 +153,9 @@ void rtk_cpu_power_down(int cpu)
 }
 EXPORT_SYMBOL(rtk_cpu_power_down);
 
-void cpu_do_lowpower(unsigned long secondary_entry_addr)
+void cpu_do_lowpower(void)
 {
-	__cpu_do_lowpower(secondary_entry_addr);
+	__cpu_do_lowpower();
 }
 EXPORT_SYMBOL(cpu_do_lowpower);
 

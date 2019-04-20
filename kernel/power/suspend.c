@@ -535,13 +535,16 @@ static int enter_state(suspend_state_t state)
 
 	if(pm_wakelock_mode == 1) {
 		while (!(pm_state == 1)) {
-			if (count == 10000){
+			if (count == 1000){
 				pr_err("[RTD16xx PM] Android suspend pre handle timeout!\n");
 				break;
 			}
             msleep(1);
 			//udelay(1);
 			count++;
+            if((count%100) == 0) {
+                pr_err("[RTD16xx PM] enter_state loop %d\n",count);
+            }
 		}
 	}
 

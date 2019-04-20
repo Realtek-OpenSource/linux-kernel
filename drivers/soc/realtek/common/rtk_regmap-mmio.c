@@ -1,7 +1,6 @@
 /*
  * This file is based on 'drivers/base/regmap/regmap-mmio.c'
  *
- * Copyright (c) 2012, NVIDIA CORPORATION.  All rights reserved.
  * Copyright (c) 2018, Realtek Semiconductor Corporation
  * Copyright (C) 2018, Cheng-Yu Lee <cylee12@realtek.com>
  *
@@ -23,35 +22,61 @@
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
+#include <linux/arm-smccc.h>
 #include <soc/realtek/rtk_regmap.h>
-#include <soc/realtek/rtk_smccall.h>
 
-static u32 swc_write(u32 addr, u32 tar, u32 val)
-{
-#ifdef CONFIG_RTK_REGMAP_SECURE_MMIO
-	return rtk_smc(tar, val, 0);
-#else
-	BUG();
-	return 0;
-#endif
-}
-
-static u32 swc_read(u32 addr, u32 tar)
-{
-#ifdef CONFIG_RTK_REGMAP_SECURE_MMIO
-	return rtk_smc(tar, 0, 0);
-#else
-	BUG();
-	return 0;
-#endif
-}
+#define RTK_REGMAP_NAME_LENGTH          20
 
 struct rtk_regmap_mmio_context {
 	void __iomem *regs;
-	struct rtk_secure_regfield *srfs;
-	u32 num_srfs;
+	const struct secure_register_desc *descs;
+	u32 num_descs;
 	u32 addr;
+	char *name;
 };
+
+static void swc_write(struct rtk_regmap_mmio_context *ctx,
+		      const struct secure_register_desc *desc,
+		      u32 val)
+{
+#ifdef CONFIG_RTK_REGMAP_SECURE_MMIO
+	struct arm_smccc_res res;
+
+	switch (desc->fmt) {
+	case SMCCC_FMT_CMD:
+		arm_smccc_smc(desc->wcmd, val, 0, 0, 0, 0, 0, 0, &res);
+		break;
+	case SMCCC_FMT_CMD_PHYS:
+		arm_smccc_smc(desc->wcmd, ctx->addr + desc->offset, val, 0, 0, 0, 0, 0, &res);
+		break;
+	}
+	return;
+#else
+	BUG();
+	return;
+#endif
+}
+
+static u32 swc_read(struct rtk_regmap_mmio_context *ctx,
+		    const struct secure_register_desc *desc)
+{
+#ifdef CONFIG_RTK_REGMAP_SECURE_MMIO
+	struct arm_smccc_res res;
+
+	switch (desc->fmt) {
+	case SMCCC_FMT_CMD:
+		arm_smccc_smc(desc->rcmd, 0, 0, 0, 0, 0, 0, 0, &res);
+		break;
+	case SMCCC_FMT_CMD_PHYS:
+		arm_smccc_smc(desc->rcmd, ctx->addr + desc->offset, 0, 0, 0, 0, 0, 0, &res);
+		break;
+	}
+	return res.a0;
+#else
+	BUG();
+	return 0;
+#endif
+}
 
 enum {
 	SWC_READ,
@@ -60,24 +85,25 @@ enum {
 
 #ifdef CONFIG_RTK_REGMAP_SECURE_MMIO
 
-static struct rtk_secure_regfield *find_secure_register(struct rtk_regmap_mmio_context *ctx,
-							u32 reg,
-							u32 type)
+static const
+struct secure_register_desc *find_desc(struct rtk_regmap_mmio_context *ctx,
+				       u32 reg,
+				       u32 type)
 {
 	u32 i;
 
-	if (!ctx->srfs)
+	if (!ctx->descs)
 		return NULL;
 
-	for (i = 0; i < ctx->num_srfs; i++) {
-		struct rtk_secure_regfield *srf = &ctx->srfs[i];
+	for (i = 0; i < ctx->num_descs; i++) {
+		const struct secure_register_desc *desc = &ctx->descs[i];
 
-		if (srf->offset == reg) {
+		if (desc->offset == reg) {
 			switch (type) {
 			case SWC_READ:
-				return srf->rcmd ? srf : NULL;
+				return desc->rcmd ? desc : NULL;
 			case SWC_WRITE:
-				return srf->wcmd ? srf : NULL;
+				return desc->wcmd ? desc : NULL;
 			default:
 				return NULL;
 			}
@@ -87,9 +113,10 @@ static struct rtk_secure_regfield *find_secure_register(struct rtk_regmap_mmio_c
 }
 
 #else
-static inline struct rtk_secure_regfield *find_secure_register(struct rtk_regmap_mmio_context *ctx,
-							       u32 reg,
-							       u32 type)
+static inline const
+struct secure_register_desc *find_desc(struct rtk_regmap_mmio_context *ctx,
+				       u32 reg,
+				       u32 type)
 {
 	return NULL;
 }
@@ -98,13 +125,13 @@ static inline struct rtk_secure_regfield *find_secure_register(struct rtk_regmap
 static int rtk_regmap_mmio_write(void *context, unsigned int reg, unsigned int val)
 {
 	struct rtk_regmap_mmio_context *ctx = context;
-	struct rtk_secure_regfield *srf = NULL;
+	const struct secure_register_desc *desc = NULL;
 
-	pr_debug("%s: reg=%03x, val=%08x\n", __func__, reg, val);
-	srf = find_secure_register(ctx, reg, SWC_WRITE);
-	if (srf) {
-		swc_write(ctx->addr + srf->offset, srf->wcmd, val);
-	} else
+	desc = find_desc(ctx, reg, SWC_WRITE);
+	pr_debug("%s: type=W, off=%03x, val=%08x, flag=%c\n", ctx->name, reg, val, desc != NULL ? 'S' : '-');
+	if (desc)
+		swc_write(ctx, desc, val);
+	else
 		writel(val, ctx->regs + reg);
 	return 0;
 }
@@ -112,14 +139,14 @@ static int rtk_regmap_mmio_write(void *context, unsigned int reg, unsigned int v
 static int rtk_regmap_mmio_read(void *context, unsigned int reg, unsigned int *val)
 {
 	struct rtk_regmap_mmio_context *ctx = context;
-	struct rtk_secure_regfield *srf = NULL;
+	const struct secure_register_desc *desc = NULL;
 
-	srf = find_secure_register(ctx, reg, SWC_READ);
-	if (srf) {
-		*val = swc_read(ctx->addr + srf->offset, srf->rcmd);
-	} else
+	desc = find_desc(ctx, reg, SWC_READ);
+	if (desc)
+		*val = swc_read(ctx, desc);
+	else
 		*val = readl(ctx->regs + reg);
-	pr_debug("%s: reg=%03x, val=%08x\n", __func__, reg, *val);
+	pr_debug("%s: type=R, off=%03x, val=%08x, flag=%c\n", ctx->name, reg, *val, desc != NULL ? 'S' : '-');
 	return 0;
 }
 
@@ -127,7 +154,8 @@ static void rtk_regmap_mmio_free_context(void *context)
 {
 	struct rtk_regmap_mmio_context *ctx = context;
 
-	kfree(ctx->srfs);
+	kfree(ctx->descs);
+	kfree(ctx->name);
 	kfree(ctx);
 }
 
@@ -152,6 +180,8 @@ static struct rtk_regmap_mmio_context *regmap_mmio_gen_context(struct device *de
 	if (!ctx)
 		return ERR_PTR(-ENOMEM);
 
+	if (config->name)
+		ctx->name = kstrdup(config->name, GFP_KERNEL);
 	ctx->regs = regs;
 
 	return ctx;
@@ -201,10 +231,14 @@ static struct rtk_regmap_mmio_context *regmap_secure_mmio_gen_context(struct dev
 	if (IS_ERR(ctx))
 		return ctx;
 
+	if (!ctx->name) {
+		ctx->name = kzalloc(RTK_REGMAP_NAME_LENGTH, GFP_KERNEL);
+		snprintf(ctx->name, RTK_REGMAP_NAME_LENGTH, "regmap-mmio.%x", config->addr);
+	}
 	ctx->addr = config->addr;
-	ctx->num_srfs = config->num_srfs;
-	ctx->srfs = kmemdup(config->srfs, sizeof(*config->srfs) * config->num_srfs, GFP_KERNEL);
-	if (!ctx->srfs) {
+	ctx->num_descs = config->num_descs;
+	ctx->descs = kmemdup(config->descs, sizeof(*config->descs) * config->num_descs, GFP_KERNEL);
+	if (!ctx->descs) {
 		rtk_regmap_mmio_free_context(ctx);
 		return ERR_PTR(-ENOMEM);
 	}

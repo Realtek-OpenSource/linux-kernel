@@ -19,7 +19,8 @@
 #include "common.h"
 #include "clk-pll.h"
 
-#define DEFUALT_OSC_RATE  27000000
+#define DEFUALT_OSC_RATE                (27000000)
+#define DEFAULT_MAX_OC_DONE_RETRY       (20000)
 
 /*
  * Since table lookup is used for freq selection, default osc rate is required
@@ -174,7 +175,7 @@ static int clk_pll_enable(struct clk_hw *hw)
 {
 	struct clk_pll *pll = to_clk_pll(hw);
 
-	if (pll->conf & CLK_PLL_CONF_POW_MASK)
+	if (clk_pll_has_pow(pll))
 		__clk_pll_set_pow_reg(pll, 1);
 	pll->status |= CLK_PLL_ENABLED;
 	return 0;
@@ -184,7 +185,7 @@ static void clk_pll_disable(struct clk_hw *hw)
 {
 	struct clk_pll *pll = to_clk_pll(hw);
 
-	if (pll->conf & CLK_PLL_CONF_POW_MASK)
+	if (clk_pll_has_pow(pll))
 		__clk_pll_set_pow_reg(pll, 0);
 	pll->status &= ~CLK_PLL_ENABLED;
 }
@@ -201,11 +202,11 @@ static int clk_pll_is_enabled(struct clk_hw *hw)
 	unsigned int pow = (pll->conf & CLK_PLL_CONF_POW_LOC_CTL3) ? 0x8 : 0x4;
 	int val;
 
-	if (pll->conf & CLK_PLL_CONF_POW_MASK)
+	if (clk_pll_has_pow(pll))
 		val = clk_reg_read(&pll->base, pll->pll_offset + pow);
 	else
 		val = !!(pll->status & CLK_PLL_ENABLED);
-	return !!(val && 0x1);
+	return !!(val & 0x1);
 }
 
 static long clk_pll_round_rate(struct clk_hw *hw,
@@ -261,6 +262,7 @@ static unsigned long clk_pll_recalc_rate(struct clk_hw *hw,
 
 static inline int __clk_pll_set_rate_reg(struct clk_pll *pll, u32 mask, u32 val)
 {
+	struct clk_hw *hw= &pll->base.hw;
 	int ret = 0;
 
 	if (pll->conf & CLK_PLL_CONF_FREQ_LOC_CTL2) {
@@ -268,18 +270,24 @@ static inline int __clk_pll_set_rate_reg(struct clk_pll *pll, u32 mask, u32 val)
 		clk_reg_update(&pll->base, pll->pll_offset + 0x8, 0x1, 0x0);
 		clk_reg_update(&pll->base, pll->pll_offset + 0x8, 0x1, 0x1);
 	} else if (pll->conf & CLK_PLL_CONF_FREQ_LOC_SSC1) {
-		int retry = 2000000;
+		int retry = DEFAULT_MAX_OC_DONE_RETRY;
 
 		clk_reg_update(&pll->base, pll->ssc_offset + 0x0, 0x7, 0x4);
 		clk_reg_update(&pll->base, pll->ssc_offset + 0x4, mask, val);
 		clk_reg_update(&pll->base, pll->ssc_offset + 0x0, 0x7, 0x5);
+
+		if (clk_pll_has_pow(pll) && !clk_pll_is_enabled(hw))
+			return 0;
+
 		ret = -ETIME;
 		while (--retry > 0) {
+			udelay(1);
 			if (clk_reg_read_notrace(&pll->base, pll->ssc_offset + 0x1c) & BIT(20)) {
 				ret = 0;
 				break;
 			}
 		}
+		pr_debug("%pC: %s: retry left=%d\n", hw->clk, __func__, retry);
 	} else {
 		clk_reg_update(&pll->base, pll->pll_offset, mask, val);
 	}

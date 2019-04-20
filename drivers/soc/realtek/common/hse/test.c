@@ -3,6 +3,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/io.h>
 #include <linux/slab.h>
+#include <soc/realtek/rtk_chip.h>
 #include "hse.h"
 #include "semem.h"
 
@@ -714,11 +715,11 @@ static void hse_test_engine_xor(struct hse_test_obj *hobj)
 	}
 }
 
-
 static int hse_test_engine(struct hse_engine *eng)
 {
 	int ret = 0;
 	struct hse_test_obj *hobj;
+	bool rotate_workaround = get_rtd_chip_revision() == RTD_CHIP_A00;
 
 	pr_err("test engine@%03x\n", eng->base_offset);
 
@@ -733,10 +734,17 @@ static int hse_test_engine(struct hse_engine *eng)
 #endif
 
 #ifdef CONFIG_RTK_HSE_HAS_ROTATE
-	reset_control_reset(eng->hdev->rstc);
+
+	if (rotate_workaround) {
+		pr_err("rotate_workaround=%d\n", rotate_workaround);
+		reset_control_reset(eng->hdev->rstc);
+	}
 	hse_test_engine_rotate(hobj);
-	reset_control_reset(eng->hdev->rstc);
+	if (rotate_workaround)
+		reset_control_reset(eng->hdev->rstc);
+	hse_test_engine_xor(hobj);
 #endif
+
 	pr_err("\n");
 	pr_err("### result ###\n");
 	pr_err("### passed: %d, failed: %d, total: %d ###\n", hobj->pass, hobj->fail, hobj->total);

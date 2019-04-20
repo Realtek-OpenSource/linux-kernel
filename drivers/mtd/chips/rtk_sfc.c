@@ -1784,7 +1784,7 @@ static int _sfc_write_bytes(struct mtd_info *mtd, loff_t to, size_t len,
 
     REG_WRITE_U32(0x00000106,SFC_EN_WR);
     REG_WRITE_U32(0x00000105,SFC_WAIT_WR);
-    REG_WRITE_U32(0x00ffffff,SFC_CE);
+    REG_WRITE_U32(0x001A1307,SFC_CE);
 	
 	if (byte_len_before_16MB) {
 		SFC_SYNC;
@@ -1995,7 +1995,7 @@ static int _sfc_write_small_pages(struct mtd_info *mtd, loff_t to, size_t len,
 
     REG_WRITE_U32(0x00000106,SFC_EN_WR);
     REG_WRITE_U32(0x00000105,SFC_WAIT_WR);
-    REG_WRITE_U32(0x00ffffff,SFC_CE);
+    REG_WRITE_U32(0x001A1307,SFC_CE);
 
 	if (byte_len_before_16MB) {
 		SFC_SYNC;
@@ -2316,7 +2316,7 @@ static int _sfc_write_pages(struct mtd_info *mtd, loff_t to, size_t len,
  
 	REG_WRITE_U32(0x00000106,SFC_EN_WR);
     REG_WRITE_U32(0x00000105,SFC_WAIT_WR);
-    REG_WRITE_U32(0x00ffffff,SFC_CE);
+    REG_WRITE_U32(0x001A1307,SFC_CE);
 
 	if (byte_len_before_16MB) {
 		SFC_SYNC;

@@ -63,14 +63,14 @@ static int  pwrctrl_pd_power_notifier(struct notifier_block *nb,
 	if (action != RTK_PD_PM_PREPARE && action != RTK_PD_PM_SUSPEND_NOIRQ)
 		return NOTIFY_DONE;
 
-	pr_err("%s: %s: power_state=%d\n", core->pd.name, __func__,
+	pr_info("%s: %s: power_state=%d\n", core->pd.name, __func__,
 		power_control_is_powered_on(&core->pc));
 	return NOTIFY_DONE;
 }
 
 void pwrctrl_pd_init(struct device *dev,
 		     struct pwrctrl_pd *pd,
-		     struct pwrctrl_pd_initdata *data)
+		     const struct pwrctrl_pd_initdata *data)
 {
 	int is_off = 1;
 
@@ -79,41 +79,43 @@ void pwrctrl_pd_init(struct device *dev,
 	pd->debug_nb.notifier_call = pwrctrl_pd_power_notifier;
 	pwrctrl_pd_register_pm_notifier(&pd->debug_nb);
 
-	if (pd->pc.ops == &rtk_sram_ops ||
-	    pd->pc.ops == &rtk_sram_async_ops) {
+	if (IS_ENABLED(CONFIG_POWER_CONTROL_PD_SRAM) &&
+	   (pd->pc.ops == &rtk_sram_power_ops ||
+	   pd->pc.ops == &rtk_sram_async_power_ops)) {
 		struct rtk_sram_pd *spd = container_of(pd, struct rtk_sram_pd, core);
 
 		spd->base = data->base;
-		spd->np = data->np;
-#ifdef CONFIG_POWER_CONTROL_PD_ANALOG
-	} else if (pd->pc.ops == &rtk_analog_ops) {
+	} else if (IS_ENABLED(CONFIG_POWER_CONTROL_PD_ANALOG) &&
+		   pd->pc.ops == &rtk_analog_power_ops) {
 		struct rtk_analog_pd *apd = container_of(pd, struct rtk_analog_pd, core);
 
 		apd->base = data->base;
 		apd->np = data->np;
-#endif
-#ifdef CONFIG_POWER_CONTROL_PD_SRAM_CH
-	} else if (pd->pc.ops == &rtk_sram_ch_ops) {
+	} else if (IS_ENABLED(CONFIG_POWER_CONTROL_PD_SRAM_CH) &&
+		   pd->pc.ops == &rtk_sram_ch_power_ops) {
 		struct rtk_sram_ch_pd *spd = container_of(pd, struct rtk_sram_ch_pd, core);
 
 		spd->base = data->base;
-#endif
+	} else if (IS_ENABLED(CONFIG_POWER_CONTROL_PD_SIMPLE) &&
+		  pd->pc.ops == &simple_power_ops) {
+		struct simple_pd *spd = container_of(pd, struct simple_pd, core);
+
+		spd->base = data->base;
 	}
 
 	/* setup power-control */
 	power_control_init(&pd->pc);
 	power_control_register(&pd->pc);
-	power_control_add_debugfs(&pd->pc);
 	if (pd->flags & RTK_PD_NO_GENPD) {
-		pr_info("%s: %s: not using genpd (power_control=%s)\n",
-			pd->pd.name, __func__, pd->pc.name);
+		pr_debug("%s: initialize as power_control %s\n",
+			pd->pd.name, pd->pc.name);
 		return;
 	}
 
 	/* since the power control is managed by genpd, increase the internal
 	 * usage count to prevent power-control framework to control it.
 	 */
-	power_control_self_get(&pd->pc);
+	power_control_get_internal(&pd->pc);
 
 	/* register genpd */
 	is_off = !pd->pc.ops->is_powered_on(&pd->pc);
@@ -236,9 +238,10 @@ int power_controller_add_of_providers(struct device *dev,
 
 	ret = of_genpd_add_provider_onecell(np, &pcd->pd_data);
 	WARN(ret, "of_genpd_add_provider_onecell() returns %d\n", ret);
-	of_power_control_add_provider(np, of_power_control_xlate_onecell,
+	ret = of_power_control_add_provider(np, of_power_control_xlate_onecell,
 		&pcd->pc_data);
-	return ret;
+	WARN(ret, "of_power_control_add_provider() returns %d\n", ret);
+	return 0;
 }
 
 int power_controller_init_pds(struct device *dev,
@@ -247,6 +250,7 @@ int power_controller_init_pds(struct device *dev,
 	struct device_node *np = dev->of_node;
 	struct pwrctrl_pd_initdata data;
 	int i;
+	int ret;
 
 	data.base = of_iomap(np, 0);
 	data.np = np;
@@ -265,7 +269,13 @@ int power_controller_init_pds(struct device *dev,
 		pwrctrl_pd_init(dev, pcd->ppds[i], &data);
 	}
 
-	return power_controller_add_of_providers(dev, pcd);
+	ret = power_controller_add_of_providers(dev, pcd);
+	WARN(ret, "power_controller_add_of_providers() returns %d\n", ret);
+
+	if (pcd->ready)
+		pcd->ready(pcd);
+	return 0;
+
 }
 
 static int power_controller_prepare(struct device *dev)

@@ -1582,3 +1582,107 @@ IRQCHIP_ACPI_DECLARE(gic_v3_or_v4, ACPI_MADT_TYPE_GENERIC_DISTRIBUTOR,
 		     acpi_validate_gic_table, ACPI_MADT_GIC_VERSION_NONE,
 		     gic_acpi_init);
 #endif
+
+#ifdef CONFIG_ARM_GIC_V3_DEBUGFS
+
+#include <linux/debugfs.h>
+#include <linux/arm-smccc.h>
+
+
+#define SB2_SWCIO_RCMD                  0x8400fffe
+#define SB2_SWCIO_WCMD                  0x8400ffff
+static struct dentry *gic_root;
+
+static int gic_gicr_class_set(void *data, u64 val)
+{
+	long i = (long)data;
+	u32 phys = per_cpu_ptr(gic_data.rdists.rdist, i)->phys_base + GICR_CLASS;
+	struct arm_smccc_res res;
+
+	if (val != 0 && val != 1)
+		return -EINVAL;
+
+	arm_smccc_smc(SB2_SWCIO_WCMD, phys, (unsigned long)val, 0, 0, 0, 0, 0, &res);
+	return 0;
+}
+static int gic_gicr_class_get(void *data, u64 *val)
+{
+	long i = (long)data;
+	u32 phys = per_cpu_ptr(gic_data.rdists.rdist, i)->phys_base + GICR_CLASS;
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(SB2_SWCIO_RCMD, phys, 0, 0, 0, 0, 0, 0, &res);
+	*val = res.a0;
+	return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(gic_gicr_class_ops,
+			gic_gicr_class_get,
+			gic_gicr_class_set,
+			"%llx\n");
+
+static int gic_gicd_iclar_set(void *data, u64 val)
+{
+	long i = (long)data;
+	u32 reg, sft, rval;
+	void __iomem *base = gic_data.dist_base;
+
+	if (val & ~0x3)
+		return -EINVAL;
+
+	reg = i / 16;
+	sft = (i % 16) * 2;
+
+	rval = readl(base + GICD_ICLAR + reg * 4);
+	rval &= ~(0x3 << sft);
+	rval |= val << sft;
+	writel(rval, base + GICD_ICLAR + reg * 4);
+	return 0;
+}
+
+static int gic_gicd_iclar_get(void *data, u64 *val)
+{
+	long i = (long)data;
+	u32 reg, sft, rval;
+	void __iomem *base = gic_data.dist_base;
+
+	reg = i / 16;
+	sft = (i % 16) * 2;
+
+	rval = readl(base + GICD_ICLAR + reg * 4);
+	*val = (rval >> sft) & 0x3;
+	return 0;
+}
+DEFINE_SIMPLE_ATTRIBUTE(gic_gicd_iclar_ops,
+			gic_gicd_iclar_get,
+			gic_gicd_iclar_set,
+			"%llx\n");
+
+static int __init gic_create_debugfs(void)
+{
+	long i;
+	char name[16];
+	struct dentry *d;
+
+	gic_root = debugfs_create_dir("gic", NULL);
+	if (!gic_root) {
+		pr_warn("couldn't not create debugfs\n");
+		return -EINVAL;
+	}
+
+	d = debugfs_create_dir("irq_class_disable", gic_root);
+	for (i = 33; i <= 121; i++) {
+		sprintf(name, "irq%ld", i);
+		debugfs_create_file(name, 0644, d, (void *)i, &gic_gicd_iclar_ops);
+	}
+
+	for_each_cpu(i, cpu_online_mask) {
+		sprintf(name, "cpu%ld", i);
+		d = debugfs_create_dir(name, gic_root);
+		debugfs_create_file("class", 0644, d, (void *)i, &gic_gicr_class_ops);
+	}
+	return 0;
+}
+late_initcall(gic_create_debugfs);
+
+#endif /* CONFIG_ARM_GIC_V3_DEBUGFS */
